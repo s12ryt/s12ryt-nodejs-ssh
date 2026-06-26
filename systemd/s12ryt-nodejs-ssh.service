@@ -1,0 +1,21 @@
+[Unit]
+Description=S12RYT Node.js SSH Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/s12ryt-nodejs-ssh
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+User=nodejs-ssh
+Group=nodejs-ssh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/s12ryt-nodejs-ssh/storage /opt/s12ryt-nodejs-ssh/config /opt/s12ryt-nodejs-ssh/keys
+
+[Install]
+WantedBy=multi-user.target

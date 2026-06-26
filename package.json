@@ -1,0 +1,46 @@
+{
+  "name": "s12ryt-nodejs-ssh",
+  "version": "0.1.0",
+  "description": "Production-ready Node.js 20 SSH server with bcrypt/public-key auth, command whitelisting, optional PTY shell, and sandboxed SFTP.",
+  "type": "module",
+  "private": false,
+  "license": "GPL-3.0-or-later",
+  "author": "s12ryt <yoyo20110918@gmail.com>",
+  "homepage": "https://github.com/s12ryt/s12ryt-nodejs-ssh#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/s12ryt/s12ryt-nodejs-ssh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/s12ryt/s12ryt-nodejs-ssh/issues"
+  },
+  "keywords": [
+    "ssh",
+    "ssh-server",
+    "ssh2",
+    "sftp",
+    "pty",
+    "bcrypt",
+    "public-key",
+    "command-whitelist",
+    "nodejs",
+    "security"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node scripts/check-syntax.js && node --test",
+    "test": "node --test",
+    "hash:password": "node scripts/hash-password.js",
+    "generate:host-key": "node scripts/generate-host-key.js",
+    "dev:setup": "node scripts/setup-dev.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "node-pty": "^1.1.0",
+    "ssh2": "^1.16.0"
+  }
+}

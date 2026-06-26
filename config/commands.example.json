@@ -1,0 +1,14 @@
+{
+  "whoami": {
+    "executable": "whoami",
+    "args": [],
+    "allowClientArgs": false,
+    "timeoutMs": 5000
+  },
+  "echo": {
+    "executable": "node",
+    "args": ["-e", "process.stdout.write(process.argv.slice(1).join(' '))"],
+    "allowClientArgs": true,
+    "timeoutMs": 5000
+  }
+}

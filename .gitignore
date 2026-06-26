@@ -1,0 +1,14 @@
+node_modules/
+
+# Secrets and runtime data (never commit)
+.env
+keys/
+storage/
+config/users.json
+config/commands.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
