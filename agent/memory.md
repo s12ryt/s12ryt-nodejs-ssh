@@ -12,3 +12,10 @@
   - logger：record 改為 `...meta` 在前、系統欄位 time/level/message 在後，避免 meta 覆蓋系統欄位。
   - shell-runner：onData/onExit/stream.on('data') 都加 `exited` 防護，避免 shell 退出後 write-after-end。
   - 新增 command-runner 回歸測試：timeout(124)、啟動失敗退出碼(1)。
+- 開源狀態（任務二）：
+  - 已開源至 GitHub：https://github.com/s12ryt/s12ryt-nodejs-ssh （public, GPL-3.0-or-later）。
+  - 作者 s12ryt <yoyo20110918@gmail.com>；git noreply email=102228212+s12ryt@users.noreply.github.com。
+  - 開源檔案：README（中英雙語）、LICENSE(GPL-3.0)、SECURITY.md、CONTRIBUTING.md、CODE_OF_CONDUCT.md、CHANGELOG.md、.github/workflows/ci.yml。
+  - 版本 0.1.0，初版發布。
+  - 注意：config/ 僅含 .example.json 範本，真實 users.json/commands.json/keys/.env 皆由 .gitignore 排除，未進版控。
+  - 環境提醒：PowerShell 會把 git stderr 進度當 error 顯示但實際成功；bash 跑 git 需帶 CI=true / GIT_TERMINAL_PROMPT=0 等非互動環境變數避免卡住。

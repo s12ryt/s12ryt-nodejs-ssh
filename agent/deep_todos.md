@@ -14,3 +14,13 @@
   - 加固 `shell-runner.js` shell 退出後對已 end stream 的寫入競態。
   - 新增 3 個 command-runner 回歸測試（timeout 124、啟動失敗退出碼、無碰撞）。
   - 驗證：`npm run check` 全綠（16 檔語法檢查、9 pass / 1 skip / 0 fail）。
+- [x] README 撰寫與開源準備：
+  - 建立 public repo：https://github.com/s12ryt/s12ryt-nodejs-ssh
+  - 完整重寫 README.md（中英雙語、3 badges、目錄、命令白名單/環境變數/專案結構表格）。
+  - 補全 package.json（author/license=GPL-3.0-or-later/repository/keywords/homepage/bugs/engines/scripts）。
+  - 建立 LICENSE（GPL-3.0 全文）、SECURITY.md、CONTRIBUTING.md、CODE_OF_CONDUCT.md（Contributor Covenant v1.4）、CHANGELOG.md（Keep a Changelog）。
+  - 建立 .github/workflows/ci.yml（ubuntu × node 20.x/22.x matrix，npm ci + npm run check）。
+  - 擴充 .gitignore（補 config/users.json、config/commands.json）。
+  - 重新同步 package-lock.json（0 vulnerabilities）。
+  - 安全掃描確認無敏感檔外洩（無 users.json/commands.json/keys/.env/storage）。
+  - git init → commit → push 到 GitHub main 成功，遠端檔案已驗證完整。
