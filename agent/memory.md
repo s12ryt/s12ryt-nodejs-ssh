@@ -19,3 +19,13 @@
   - 版本 0.1.0，初版發布。
   - 注意：config/ 僅含 .example.json 範本，真實 users.json/commands.json/keys/.env 皆由 .gitignore 排除，未進版控。
   - 環境提醒：PowerShell 會把 git stderr 進度當 error 顯示但實際成功；bash 跑 git 需帶 CI=true / GIT_TERMINAL_PROMPT=0 等非互動環境變數避免卡住。
+- 部署可行性檢查（2026-06-27）：
+  - 本機環境 Node v24.11.1 / npm 11.7.0；package engines 為 Node >=20。
+  - `npm run check` 通過：16 個檔案語法檢查、9 pass / 1 skip / 0 fail；Windows 跳過 PTY shell 整合測試。
+  - LSP diagnostics 掃描 16 個 JS 檔，0 errors / 0 diagnostics。
+  - `npm audit --omit=dev` 回報 0 vulnerabilities。
+  - `node src/index.js` 在目前工作區無法直接啟動，原因是 runtime secret/config 未建立：缺少 `keys/ssh_host_ed25519_key`；同時正式部署也需補 `config/users.json`、`config/commands.json`、`.env` 與 `storage/sftp` 權限。
+  - 結論：程式碼檢查通過，適合部署到支援長駐 TCP 服務的 Linux VM/VPS/systemd 環境；不適合 Vercel/Netlify 這類 HTTP serverless 平台。部署前需依 README Production Setup 建立 runtime 檔案與防火牆規則。
+- 一鍵啟動更新（2026-06-27）：
+  - 新增 `start.js` 作為 `npm start` 入口；會先建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、`keys/ssh_host_ed25519_key`，再 import `src/index.js`。
+  - 安全分歧：`NODE_ENV=production` 缺 `config/users.json` 時直接中止，不自動建立預設開發帳號；需要直接跑舊入口可用 `npm run start:raw`。

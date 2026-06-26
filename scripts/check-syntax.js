@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const roots = ['src', 'scripts', 'test'];
+const standaloneFiles = ['start.js'];
 
 function collectJavaScriptFiles(directory) {
   if (!fs.existsSync(directory)) {
@@ -18,7 +19,7 @@ function collectJavaScriptFiles(directory) {
   });
 }
 
-const files = roots.flatMap(collectJavaScriptFiles);
+const files = [...standaloneFiles.filter((file) => fs.existsSync(file)), ...roots.flatMap(collectJavaScriptFiles)];
 
 for (const file of files) {
   const result = spawnSync(process.execPath, ['--check', file], { stdio: 'inherit' });

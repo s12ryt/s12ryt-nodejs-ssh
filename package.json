@@ -30,7 +30,8 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node start.js",
+    "start:raw": "node src/index.js",
     "check": "node scripts/check-syntax.js && node --test",
     "test": "node --test",
     "hash:password": "node scripts/hash-password.js",

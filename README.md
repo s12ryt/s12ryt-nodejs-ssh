@@ -41,8 +41,6 @@
 
 ```bash
 npm install
-npm run dev:setup
-npm run generate:host-key
 npm start
 ```
 
@@ -53,8 +51,11 @@ ssh -p 2222 deploy@127.0.0.1 whoami
 sftp -P 2222 deploy@127.0.0.1
 ```
 
-`npm run dev:setup` 會建立開發用帳號 `deploy / ChangeMe123!`，正式環境請立即替換。
-`npm run dev:setup` creates a development account `deploy / ChangeMe123!`; replace it immediately in production.
+`npm start` 會透過 `start.js` 自動建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp` 與 SSH host key，再啟動 server。
+`npm start` uses `start.js` to create missing `.env`, `config/commands.json`, development `config/users.json`, `storage/sftp`, and the SSH host key before starting the server.
+
+預設開發帳號為 `deploy / ChangeMe123!`。正式環境設定 `NODE_ENV=production` 時，若缺少 `config/users.json` 會直接中止，不會自動建立預設密碼帳號。
+The default development account is `deploy / ChangeMe123!`. With `NODE_ENV=production`, missing `config/users.json` stops startup instead of creating a default-password account.
 
 ## 正式環境設定 Production Setup
 
@@ -64,6 +65,9 @@ sftp -P 2222 deploy@127.0.0.1
 4. 複製 `config/users.example.json` 為 `config/users.json`，填入使用者、密碼 hash 與公鑰。Fill in users, password hashes, and public keys.
 5. 複製 `config/commands.example.json` 為 `config/commands.json`，只加入需要開放的命令。Add only the commands you want to expose.
 6. 確認 `keys/`、`config/users.json`、`.env` 權限只有服務帳號可讀。Restrict file permissions so only the service account can read secrets.
+
+也可以執行 `npm start` 讓 `start.js` 補齊非敏感範本與 host key；正式環境仍需先自行建立 `config/users.json`。
+You can also run `npm start` so `start.js` fills non-sensitive templates and the host key; production still requires you to create `config/users.json` first.
 
 > ⚠️ `config/users.json`、`config/commands.json`、`.env`、`keys/`、`storage/` 都已列入 `.gitignore`，請勿提交。These files are git-ignored and must never be committed.
 

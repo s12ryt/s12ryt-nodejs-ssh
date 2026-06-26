@@ -24,3 +24,13 @@
   - 重新同步 package-lock.json（0 vulnerabilities）。
   - 安全掃描確認無敏感檔外洩（無 users.json/commands.json/keys/.env/storage）。
   - git init → commit → push 到 GitHub main 成功，遠端檔案已驗證完整。
+- [x] 部署可行性檢查（2026-06-27）：
+  - `npm run check` 通過（16 syntax files、9 pass / 1 skip / 0 fail）。
+  - LSP diagnostics：16 JS files、0 diagnostics。
+  - `npm audit --omit=dev`：0 vulnerabilities。
+  - `node src/index.js` 驗證到預期阻塞：缺少 `keys/ssh_host_ed25519_key`，需正式部署時建立 host key、users.json、commands.json、.env 與 storage 權限。
+  - 判定：程式碼可部署到 Linux VM/VPS/systemd 類長駐 TCP 環境；runtime 機密/config 補齊前不能直接啟動。
+- [x] 一鍵啟動腳本（2026-06-27）：
+  - 新增根目錄 `start.js`，啟動前自動補 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、SSH host key。
+  - `NODE_ENV=production` 缺 `config/users.json` 時會中止，避免正式環境自動使用 `deploy / ChangeMe123!`。
+  - `npm start` 改為 `node start.js`，保留 `npm run start:raw` 直接啟動 `src/index.js`。
