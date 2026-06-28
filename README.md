@@ -34,7 +34,7 @@
 - **SSH server**：使用 [`ssh2`](https://github.com/mscdex/ssh2)。Built on `ssh2`.
 - **認證 Auth**：支援 bcrypt 密碼雜湊與 authorized keys 公鑰。bcrypt password hashes and authorized public keys.
 - **命令執行 Command execution**：只允許 `config/commands.json` 白名單內的命令，以 `spawn(shell: false)` 執行避免注入。Only whitelisted commands run, spawned without a shell to prevent injection.
-- **互動 shell Interactive shell**：可透過 `SSH_ENABLE_SHELL=true` 啟用，使用真實 PTY 支援互動程式與視窗 resize。Optional real-PTY shell behind an explicit flag.
+- **互動 shell Interactive shell**：預設啟用，使用真實 PTY 支援互動程式與視窗 resize，工作目錄預設為 `s12ryt/`。Real-PTY shell enabled by default with `s12ryt/` as the default workspace.
 - **SFTP**：所有檔案操作限制在 `SSH_SFTP_ROOT` 內，路徑逃逸會被擋下。All file operations are sandboxed to the SFTP root.
 - **生產部署 Production**：環境變數設定、graceful shutdown、JSON log、最大連線數限制。Env-based config, graceful shutdown, JSON logs, max-connection limiting.
 
@@ -52,8 +52,8 @@ ssh -p 2222 deploy@127.0.0.1 whoami
 sftp -P 2222 deploy@127.0.0.1
 ```
 
-`npm start` 會透過 `start.js` 自動建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp` 與 SSH host key，再啟動 server。
-`npm start` uses `start.js` to create missing `.env`, `config/commands.json`, development `config/users.json`, `storage/sftp`, and the SSH host key before starting the server.
+`npm start` 會透過 `start.js` 自動建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`s12ryt/` 工作目錄與 SSH host key，再啟動 server。
+`npm start` uses `start.js` to create missing `.env`, `config/commands.json`, development `config/users.json`, the `s12ryt/` workspace, and the SSH host key before starting the server.
 
 預設開發帳號為 `.env` 的 `SSH_DEFAULT_USERNAME` / `SSH_DEFAULT_PASSWORD`。正式環境設定 `NODE_ENV=production` 時，若缺少 `config/users.json` 會直接中止，不會自動建立預設密碼帳號。
 The default development account is `SSH_DEFAULT_USERNAME` / `SSH_DEFAULT_PASSWORD` from `.env`. With `NODE_ENV=production`, missing `config/users.json` stops startup instead of creating a default-password account.
@@ -156,16 +156,34 @@ sftp -P 2222 root@127.0.0.1
 
 ## 互動式 Shell Interactive Shell
 
-若需要互動式 shell，額外設定 If you need an interactive shell, also set：
+互動式 shell 預設開啟，使用者登入後的工作目錄預設是專案內的 `s12ryt/`。例如在 SSH 裡執行 `npm install`、下載檔案或建立專案，檔案會落在 `{project}/s12ryt`。
+Interactive shell is enabled by default, and the default working directory is the project-local `s12ryt/` directory. Files created by commands such as `npm install`, downloads, or generated projects are placed under `{project}/s12ryt`.
+
+可用以下環境變數調整 shell 行為。You can tune shell behavior with these variables:
 
 ```bash
 SSH_ENABLE_SHELL=true
 SSH_SHELL_PATH=/bin/bash
-SSH_SHELL_CWD=./storage/sftp
+SSH_SHELL_CWD=./s12ryt
 ```
 
-未啟用時，shell request 會被拒絕，仍可使用白名單 `exec` 與 SFTP。
-When disabled, shell requests are rejected while whitelisted `exec` and SFTP keep working.
+Windows 不會被模擬成 Linux；若未指定 `SSH_SHELL_PATH`，Windows 會使用系統預設 shell，Linux/macOS 會使用 `/bin/sh` 或 `$SHELL`。你已要求不要使用 WSL，所以這裡不會啟動 WSL。
+Windows is not emulated as Linux. Without `SSH_SHELL_PATH`, Windows uses the system default shell, while Linux/macOS use `/bin/sh` or `$SHELL`. WSL is not used.
+
+若關閉 shell，shell request 會被拒絕，仍可使用白名單 `exec` 與 SFTP。
+When shell is disabled, shell requests are rejected while whitelisted `exec` and SFTP keep working.
+
+若使用 `ssh2` client 呼叫 `client.shell()`，請先檢查 callback 的 `error`；預設未啟用 shell 時 `stream` 會是 `undefined`，直接呼叫 `stream.setEncoding()` 會造成 `TypeError`。
+When using the `ssh2` client with `client.shell()`, check the callback `error` first. With shell disabled by default, `stream` is `undefined`; calling `stream.setEncoding()` directly will throw `TypeError`.
+
+```js
+client.shell((error, stream) => {
+  if (error) {
+    throw error;
+  }
+  stream.setEncoding('utf8');
+});
+```
 
 ## 命令白名單 Command Whitelist
 
@@ -201,10 +219,10 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 | `SSH_HOST_KEY_PATH` | `./keys/ssh_host_ed25519_key` | Host key 路徑 |
 | `SSH_USERS_FILE` | `./config/users.json` | 使用者設定 Users file |
 | `SSH_COMMANDS_FILE` | `./config/commands.json` | 命令白名單 Commands file |
-| `SSH_SFTP_ROOT` | `./storage/sftp` | SFTP 根目錄 SFTP root |
-| `SSH_ENABLE_SHELL` | `false` | 是否啟用互動 shell |
+| `SSH_SFTP_ROOT` | `./s12ryt` | SFTP 根目錄 SFTP root |
+| `SSH_ENABLE_SHELL` | `true` | 是否啟用互動 shell |
 | `SSH_SHELL_PATH` | OS 預設 | 互動 shell 程式 |
-| `SSH_SHELL_CWD` | 使用者家目錄 | 互動 shell 工作目錄 |
+| `SSH_SHELL_CWD` | `./s12ryt` | 互動 shell 工作目錄 |
 | `SSH_MAX_CLIENTS` | `3` | 最大同時連線數 Max clients |
 | `SSH_READY_TIMEOUT_MS` | `20000` | 握手逾時 Handshake timeout |
 | `SSH_LOG_LEVEL` | `info` | 日誌等級 Log level |
@@ -225,12 +243,12 @@ docker run --rm -p 2222:2222 \
   -v ./config/users.json:/app/config/users.json:ro \
   -v ./config/commands.json:/app/config/commands.json:ro \
   -v ./keys:/app/keys \
-  -v ./storage:/app/storage \
+  -v ./s12ryt:/app/s12ryt \
   ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 ```
 
-正式環境請自行掛載 `config/users.json`、`config/commands.json`、`keys/` 與 `storage/`；不要把真實密碼、公鑰或 host key bake 進 image。
-Mount `config/users.json`, `config/commands.json`, `keys/`, and `storage/` in production; do not bake real credentials or host keys into the image.
+正式環境請自行掛載 `config/users.json`、`config/commands.json`、`keys/` 與 `s12ryt/`；不要把真實密碼、公鑰、host key 或使用者工作檔案 bake 進 image。
+Mount `config/users.json`, `config/commands.json`, `keys/`, and `s12ryt/` in production; do not bake real credentials, host keys, or user workspace files into the image.
 
 ## 專案結構 Project Structure
 
@@ -253,8 +271,9 @@ Mount `config/users.json`, `config/commands.json`, `keys/`, and `storage/` in pr
 ## 安全注意事項 Security Notes
 
 - 不要把 `keys/`、`.env`、`config/users.json`、`config/commands.json` 提交到版本控制。Never commit secrets.
+- `s12ryt/` 是使用者 SSH/SFTP 工作目錄，可能包含下載、安裝或產生的檔案，預設已忽略。`s12ryt/` is the SSH/SFTP workspace and is git-ignored by default.
 - 不要在 `commands.json` 加入 shell 包裝器，例如 `sh -c`、`cmd /c`、`powershell -Command`。Do not add shell wrappers to the whitelist.
-- 只有可信使用者才建議啟用 `SSH_ENABLE_SHELL=true`，因為互動 shell 等同開放該服務帳號的任意命令執行能力。Only enable the shell for trusted users.
+- 互動 shell 預設開啟，請只給可信使用者帳號；互動 shell 等同開放該服務帳號的任意命令執行能力。Interactive shell is enabled by default; only create accounts for trusted users.
 - 若要開放參數，請只對低風險命令設定 `allowClientArgs: true`。Enable `allowClientArgs` only for low-risk commands.
 - SFTP 根目錄建議放在獨立資料夾，並限制 OS 檔案權限。Keep the SFTP root isolated with strict OS permissions.
 - 對外部署請搭配防火牆，只允許可信 IP 連線。Pair public deployments with IP allow-listing.
