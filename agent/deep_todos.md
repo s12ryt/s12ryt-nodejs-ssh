@@ -69,3 +69,9 @@
 - [x] Docker 部署 README 詳細教學（2026-06-28）：
   - Container Image 章節補完整部署流程：建立部署目錄、建立 users/commands 設定、`docker run`、連線測試、Docker Compose、更新容器與 troubleshooting。
   - 補安全提醒：`config/users.json` 初次啟動前可能有明文密碼、`keys/` 需持久保存、`s12ryt/` 是使用者工作資料、對外開放需防火牆限制。
+- [x] Docker `/app/package.json` 啟動錯誤修復（2026-06-28）：
+  - Docker runtime CMD 改為 `node start.js`，避免用 `npm start` 啟動時直接依賴 `/app/package.json`。
+  - README 補充禁止掛載主機目錄到 `/app`；若使用 `-v ...:/app` 或 Compose `.:/app` 會覆蓋 image 內建程式檔，導致 `/app/package.json` 或 `start.js` 找不到。
+- [x] Docker `.env.example` 範本缺失修復（2026-06-28）：
+  - `start.js` 啟動時會從 `.env.example` 複製 `.env`，Dockerfile runtime 補 `COPY .env.example ./`。
+  - README troubleshooting 新增 `[start] Missing template file: .env.example`：通常代表 image 太舊或缺範本，需重新 pull/build 最新 image。

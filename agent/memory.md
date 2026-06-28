@@ -57,3 +57,11 @@
 - Docker 部署文件更新（2026-06-28）：
   - README 的 Container Image 章節已擴充為完整 Docker 部署教學：部署目錄、users/commands 設定、docker run、docker compose、更新流程、權限安全與 troubleshooting。
   - 文件強調 runtime secrets/config/keys/s12ryt 工作目錄都需用 volume 掛載，不 bake 進 image。
+- Docker 啟動入口加固（2026-06-28）：
+  - 使用者回報 Docker 部署出現 `npm ERR! path /app/package.json`。
+  - `Dockerfile` runtime CMD 從 `npm start` 改為 `node start.js`，減少容器啟動時對 npm/package metadata 的依賴。
+  - README 補充不要把主機目錄掛到 `/app`，避免覆蓋 image 內建 `package.json`、`start.js`、`src/`；troubleshooting 新增 `/app/package.json` 錯誤處理。
+- Docker `.env.example` 範本修復（2026-06-28）：
+  - 使用者回報容器啟動 `[start] Missing template file: .env.example`。
+  - `start.js` 會用 `.env.example` 補 `.env`，Dockerfile runtime 現已複製 `.env.example` 到 `/app`。
+  - README troubleshooting 補充此錯誤代表 image 太舊或缺範本，需重新 pull/build 最新 image。
