@@ -31,7 +31,7 @@
   - `node src/index.js` 驗證到預期阻塞：缺少 `keys/ssh_host_ed25519_key`，需正式部署時建立 host key、users.json、commands.json、.env 與 storage 權限。
   - 判定：程式碼可部署到 Linux VM/VPS/systemd 類長駐 TCP 環境；runtime 機密/config 補齊前不能直接啟動。
 - [x] 一鍵啟動腳本（2026-06-27）：
-  - 新增根目錄 `start.js`，啟動前自動補 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、SSH host key。
+  - 新增根目錄 `start.js`，啟動前自動補 `.env`、`config/commands.json`、開發用 `config/users.json`、`s12ryt/`、SSH host key。
   - `NODE_ENV=production` 缺 `config/users.json` 時會中止，避免正式環境自動使用 `deploy / ChangeMe123!`。
   - `npm start` 改為 `node start.js`，保留 `npm run start:raw` 直接啟動 `src/index.js`。
 - [x] `.env` 支援預設連線用戶名（2026-06-28）：
@@ -56,3 +56,13 @@
   - 新增 `.dockerignore`，排除 `.env`、真實 config、keys、storage、node_modules、test、agent 等不應進 image 的內容。
   - 新增 `.github/workflows/ghcr.yml`，使用 Docker Buildx、metadata-action、build-push-action，push main/tag/manual 會推送 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`，PR 僅建置驗證。
   - README 補 GHCR image pull/run 範例與 runtime secrets 掛載提醒。
+- [x] SSH stream TypeError 防護（2026-06-28）：
+  - 判定使用者貼出的 `Cannot read properties of undefined (reading 'setEncoding')` 多半來自 `ssh2` client 在 shell request 被拒後未先檢查 callback error 就使用 stream。
+  - `server.js` 補 session/exec/shell/sftp accept 空值防護與 reject/log，避免 channel 異常擴散。
+  - `command-runner.js` 對沒有 `stream.stderr` 的 exec stream fallback 到主 stream，避免錯誤輸出時 TypeError。
+  - README 補 `client.shell()` 正確 error-first 範例。
+- [x] SSH 使用者工作目錄與預設 shell（2026-06-28）：
+  - 使用者確認不要 WSL / 不做虛擬 Linux 終端；Windows 下仍使用 Windows 預設 shell 或 `SSH_SHELL_PATH` 指定的 shell。
+  - `SSH_ENABLE_SHELL` 預設改為 true，避免一般 SSH shell request 被拒造成 client 端 undefined stream。
+  - `SSH_SHELL_CWD` 與 `SSH_SFTP_ROOT` 預設改為 `./s12ryt`，使用者透過 SSH 執行 `npm install`、下載或產生的檔案集中在專案 `s12ryt/`。
+  - `start.js` / `scripts/setup-dev.js` 會自動建立 `s12ryt/`；`.gitignore`、`.dockerignore` 與 Dockerfile 同步更新。
