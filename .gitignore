@@ -4,6 +4,7 @@ node_modules/
 .env
 keys/
 storage/
+s12ryt/
 config/users.json
 config/commands.json
 

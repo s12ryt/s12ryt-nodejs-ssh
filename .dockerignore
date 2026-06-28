@@ -9,5 +9,6 @@ config/users.json
 config/commands.json
 keys
 storage
+s12ryt
 test
 *.local

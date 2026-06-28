@@ -25,7 +25,7 @@ COPY src ./src
 COPY scripts ./scripts
 COPY config/*.example.json ./config/
 
-RUN mkdir -p /app/config /app/keys /app/storage/sftp \
+RUN mkdir -p /app/config /app/keys /app/s12ryt \
   && chown -R node:node /app
 
 USER node
