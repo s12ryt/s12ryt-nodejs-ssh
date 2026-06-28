@@ -20,6 +20,7 @@ RUN apt-get update \
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
+COPY .env.example ./
 COPY start.js ./
 COPY src ./src
 COPY scripts ./scripts
@@ -31,4 +32,4 @@ RUN mkdir -p /app/config /app/keys /app/s12ryt \
 USER node
 EXPOSE 2222
 
-CMD ["npm", "start"]
+CMD ["node", "start.js"]

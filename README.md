@@ -243,6 +243,9 @@ docker pull ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 容器內固定使用 `/app` 作為工作目錄，SSH 服務預設監聽容器內 `2222` port。正式部署時，請把 runtime 檔案從主機掛載進容器，不要把真實密碼、host key 或使用者工作檔案放進 image。
 The container uses `/app` as its working directory and listens on container port `2222` by default. Mount runtime files from the host in production; do not bake real passwords, host keys, or user workspace files into the image.
 
+> ⚠️ 不要把主機目錄掛載到 `/app`。例如 `-v $(pwd):/app` 或 Compose 的 `.:/app` 會覆蓋 image 內建的 `package.json`、`start.js`、`src/`，造成 `npm ERR! path /app/package.json` 或找不到啟動檔。只掛載下方範例列出的單一 runtime 檔案與資料夾。
+> Do not mount a host directory to `/app`. Mounts such as `-v $(pwd):/app` or `.:/app` overwrite the image's `package.json`, `start.js`, and `src/`, causing errors like `npm ERR! path /app/package.json` or missing startup files. Mount only the runtime files and directories shown below.
+
 1. 建立部署目錄。Create a deployment directory:
 
 ```bash
@@ -390,6 +393,8 @@ docker compose up -d
 | 密碼登入失敗 | 確認 SSH 用戶名等於 `config/users.json` 的 `username`，且 `password` 至少 8 字元或已是 bcrypt hash。 |
 | SFTP 看不到檔案 | 檔案根目錄是掛載的 `./s12ryt`，不是 repo 根目錄。 |
 | SSH client 警告 host key changed | 檢查 `./keys` 是否被刪除或換過；需要保留同一份 host key。 |
+| `npm ERR! path /app/package.json` | 檢查 `docker run` / Compose 是否把主機目錄掛到 `/app`，請移除 `-v ...:/app` 或 `.:/app`，只保留 `config/users.json`、`config/commands.json`、`keys/`、`s12ryt/` 這幾個掛載。 |
+| `[start] Missing template file: .env.example` | 代表 image 內缺少啟動範本檔。請重新拉取或重新 build 最新 image；不要用舊版 image 搭配新版部署文件。 |
 
 ## 專案結構 Project Structure
 
