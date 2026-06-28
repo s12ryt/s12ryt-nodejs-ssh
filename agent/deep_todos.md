@@ -51,3 +51,8 @@
   - `start.js`、`scripts/setup-dev.js`、`config/users.example.json` 改成產生/示範 `password` 欄位。
   - 新增 `test/auth.test.js` 覆蓋明文自動 hash 與舊 `passwordHash` 遷移。
   - README 新增詳細 `config/users.json` 建立教學、欄位說明、多用戶範例、改密碼方式與權限注意事項。
+- [x] GHCR image workflow（2026-06-28）：
+  - 新增 `Dockerfile`，使用 Node 20 Debian slim，多階段安裝 production dependencies，runtime 安裝 `openssh-client` 供 `start.js` 產生 host key。
+  - 新增 `.dockerignore`，排除 `.env`、真實 config、keys、storage、node_modules、test、agent 等不應進 image 的內容。
+  - 新增 `.github/workflows/ghcr.yml`，使用 Docker Buildx、metadata-action、build-push-action，push main/tag/manual 會推送 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`，PR 僅建置驗證。
+  - README 補 GHCR image pull/run 範例與 runtime secrets 掛載提醒。

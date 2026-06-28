@@ -20,6 +20,7 @@
 - [互動式 Shell Interactive Shell](#互動式-shell-interactive-shell)
 - [命令白名單 Command Whitelist](#命令白名單-command-whitelist)
 - [環境變數 Environment Variables](#環境變數-environment-variables)
+- [Container Image](#container-image)
 - [專案結構 Project Structure](#專案結構-project-structure)
 - [安全注意事項 Security Notes](#安全注意事項-security-notes)
 - [驗證 Verification](#驗證-verification)
@@ -208,6 +209,29 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 | `SSH_READY_TIMEOUT_MS` | `20000` | 握手逾時 Handshake timeout |
 | `SSH_LOG_LEVEL` | `info` | 日誌等級 Log level |
 
+## Container Image
+
+每次 push 到 `main` 或推送 `v*.*.*` tag 時，GitHub Actions 會自動建置並推送 GHCR image。
+GitHub Actions automatically builds and pushes the GHCR image on pushes to `main` and `v*.*.*` tags.
+
+```bash
+docker pull ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
+```
+
+常用執行範例 Example run:
+
+```bash
+docker run --rm -p 2222:2222 \
+  -v ./config/users.json:/app/config/users.json:ro \
+  -v ./config/commands.json:/app/config/commands.json:ro \
+  -v ./keys:/app/keys \
+  -v ./storage:/app/storage \
+  ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
+```
+
+正式環境請自行掛載 `config/users.json`、`config/commands.json`、`keys/` 與 `storage/`；不要把真實密碼、公鑰或 host key bake 進 image。
+Mount `config/users.json`, `config/commands.json`, `keys/`, and `storage/` in production; do not bake real credentials or host keys into the image.
+
 ## 專案結構 Project Structure
 
 | 路徑 Path | 用途 Purpose |
@@ -223,6 +247,7 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 | `src/logger.js` | JSON 結構化日誌。Structured JSON logging. |
 | `scripts/` | 初始化、密碼雜湊、host key 產生工具。Setup utilities. |
 | `config/` | 使用者與命令白名單設定範本。Config templates. |
+| `.github/workflows/ghcr.yml` | 自動建置並推送 GHCR container image。Builds and pushes the GHCR container image. |
 | `test/` | 單元與整合測試。Unit and integration tests. |
 
 ## 安全注意事項 Security Notes

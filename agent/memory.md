@@ -43,3 +43,7 @@
   - 新增用戶可在 `password` 填明文密碼；`createAuthenticator()` 載入時會自動 bcrypt hash 並寫回同一個 `password` 欄位。
   - 舊版 `passwordHash` 仍會自動遷移成 `password`，避免既有 users 檔直接失效。
   - README 已補完整建立 `config/users.json` 教學與多用戶範例。
+- GHCR container image 自動建置（2026-06-28）：
+  - 新增 `Dockerfile` / `.dockerignore` / `.github/workflows/ghcr.yml`。
+  - workflow 會在 push main、push `v*.*.*` tag、手動 workflow_dispatch 時推送到 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`；PR 只 build 不 push。
+  - image 不包含真實 `.env`、`config/users.json`、`config/commands.json`、`keys/`、`storage/`，正式環境需用 volume 掛載 runtime config/secrets。
