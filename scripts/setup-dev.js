@@ -25,7 +25,7 @@ function copyIfMissing(source, target) {
 
 fs.mkdirSync(path.join(root, 'config'), { recursive: true });
 fs.mkdirSync(path.join(root, 'keys'), { recursive: true });
-fs.mkdirSync(path.join(root, 'storage', 'sftp'), { recursive: true });
+fs.mkdirSync(path.join(root, 's12ryt'), { recursive: true });
 
 copyIfMissing(path.join(root, '.env.example'), path.join(root, '.env'));
 copyIfMissing(path.join(root, 'config', 'commands.example.json'), path.join(root, 'config', 'commands.json'));

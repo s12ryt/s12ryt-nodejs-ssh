@@ -48,10 +48,10 @@ export function loadConfig() {
     hostKeyPath: resolveFromRoot(process.env.SSH_HOST_KEY_PATH || './keys/ssh_host_ed25519_key'),
     usersFile: resolveFromRoot(process.env.SSH_USERS_FILE || './config/users.json'),
     commandsFile: resolveFromRoot(process.env.SSH_COMMANDS_FILE || './config/commands.json'),
-    sftpRoot: resolveFromRoot(process.env.SSH_SFTP_ROOT || './storage/sftp'),
-    enableShell: readBoolean('SSH_ENABLE_SHELL', false),
+    sftpRoot: resolveFromRoot(process.env.SSH_SFTP_ROOT || './s12ryt'),
+    enableShell: readBoolean('SSH_ENABLE_SHELL', true),
     shellPath: process.env.SSH_SHELL_PATH || undefined,
-    shellCwd: process.env.SSH_SHELL_CWD ? resolveFromRoot(process.env.SSH_SHELL_CWD) : undefined,
+    shellCwd: resolveFromRoot(process.env.SSH_SHELL_CWD || './s12ryt'),
     maxClients: readInteger('SSH_MAX_CLIENTS', 3, { min: 1, max: 100 }),
     readyTimeoutMs: readInteger('SSH_READY_TIMEOUT_MS', 20000, { min: 1000 }),
     logLevel: process.env.SSH_LOG_LEVEL || 'info'
@@ -62,5 +62,6 @@ export function loadConfig() {
   }
 
   fs.mkdirSync(config.sftpRoot, { recursive: true });
+  fs.mkdirSync(config.shellCwd, { recursive: true });
   return config;
 }

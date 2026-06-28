@@ -16,6 +16,7 @@ let commandsPath;
 let usersPath;
 let hostKeyPath;
 let sftpRoot;
+let shellCwd;
 
 function log(message) {
   console.log(`[start] ${message}`);
@@ -69,11 +70,12 @@ function loadEnv() {
   commandsPath = resolveRuntimePath('SSH_COMMANDS_FILE', './config/commands.json');
   usersPath = resolveRuntimePath('SSH_USERS_FILE', './config/users.json');
   hostKeyPath = resolveRuntimePath('SSH_HOST_KEY_PATH', './keys/ssh_host_ed25519_key');
-  sftpRoot = resolveRuntimePath('SSH_SFTP_ROOT', './storage/sftp');
+  sftpRoot = resolveRuntimePath('SSH_SFTP_ROOT', './s12ryt');
+  shellCwd = resolveRuntimePath('SSH_SHELL_CWD', './s12ryt');
 }
 
 function ensureDirectories() {
-  for (const directory of [path.dirname(hostKeyPath), path.dirname(usersPath), path.dirname(commandsPath), sftpRoot]) {
+  for (const directory of [path.dirname(hostKeyPath), path.dirname(usersPath), path.dirname(commandsPath), sftpRoot, shellCwd]) {
     fs.mkdirSync(directory, { recursive: true });
   }
 }
