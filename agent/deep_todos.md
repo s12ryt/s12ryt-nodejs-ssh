@@ -34,3 +34,20 @@
   - 新增根目錄 `start.js`，啟動前自動補 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、SSH host key。
   - `NODE_ENV=production` 缺 `config/users.json` 時會中止，避免正式環境自動使用 `deploy / ChangeMe123!`。
   - `npm start` 改為 `node start.js`，保留 `npm run start:raw` 直接啟動 `src/index.js`。
+- [x] `.env` 支援預設連線用戶名（2026-06-28）：
+  - 新增 `SSH_DEFAULT_USERNAME`，本機 `.env` 設為 `root`，`.env.example` 預設為 `deploy`。
+  - `start.js` 自動建立缺少的開發用 `config/users.json` 時改用 `SSH_DEFAULT_USERNAME`，並驗證不可為空。
+  - `scripts/setup-dev.js` 補 `dotenv.config()`，讓 `npm run dev:setup` 也讀取 `.env` 的 `SSH_DEFAULT_USERNAME`。
+  - README 補充新環境變數與「既有 `config/users.json` 不會被覆蓋」行為。
+  - 驗證：LSP diagnostics 0、`npm run check` 通過（17 syntax files、9 pass / 1 skip / 0 fail）。
+- [x] `.env` 支援預設開發密碼（2026-06-28）：
+  - 新增 `SSH_DEFAULT_PASSWORD`，本機 `.env` 與 `.env.example` 目前為 `ChangeMe123!`。
+  - `start.js` / `scripts/setup-dev.js` 自動建立缺少的開發用 `config/users.json` 時使用 `SSH_DEFAULT_PASSWORD` 寫入 `password`，並要求至少 8 字元。
+  - 明文密碼不再輸出到初始化 log；server 首次載入 users 檔後會自動 bcrypt hash 並寫回 `password`。
+  - README 補充密碼變數與既有 users 檔不會被覆蓋的行為。
+- [x] `users.json` 改用 `password` 欄位（2026-06-28）：
+  - `src/auth.js` 新增 users 正規化流程：明文 `password` 自動 bcrypt hash 寫回；bcrypt hash 不重複處理。
+  - 舊版 `passwordHash` 自動遷移為 `password`，保持向後相容。
+  - `start.js`、`scripts/setup-dev.js`、`config/users.example.json` 改成產生/示範 `password` 欄位。
+  - 新增 `test/auth.test.js` 覆蓋明文自動 hash 與舊 `passwordHash` 遷移。
+  - README 新增詳細 `config/users.json` 建立教學、欄位說明、多用戶範例、改密碼方式與權限注意事項。
