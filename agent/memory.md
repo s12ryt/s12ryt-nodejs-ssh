@@ -1,9 +1,9 @@
 # Memory
 
 - 專案目標：建立可部署到生產環境的 Node.js 20 SSH server。
-- 安全策略：預設採命令白名單，互動 shell 預設關閉且需 `SSH_ENABLE_SHELL=true` 才開放；SFTP 路徑需限制在指定根目錄內。
+- 安全策略：支援命令白名單；目前依使用者需求改為互動 shell 預設開啟，僅應給可信使用者；SFTP 路徑需限制在指定根目錄內。
 - 認證策略：支援密碼雜湊與 SSH authorized keys 公鑰認證。
-- 目前狀態：已完成 `ssh2` server、bcrypt 密碼認證、公鑰認證、白名單 exec、可選互動 shell + `node-pty` 真 PTY、SFTP 根目錄限制、systemd 範本與整合測試。
+- 目前狀態：已完成 `ssh2` server、bcrypt 密碼認證、公鑰認證、白名單 exec、預設啟用互動 shell + `node-pty` 真 PTY、SFTP 根目錄限制、systemd 範本與整合測試。
 - 驗證紀錄：Windows 環境 `npm run check` 通過 9 個測試、跳過 1 個 Windows `node-pty` 真 PTY 整合測試；Linux/macOS 仍會執行真 PTY shell 測試。
 - 自主疊代升級紀錄（不動功能，只修 bug/加固/優化）：
   - command-runner：exit 競態用 `settled` 旗標防護，timeout 統一回退碼 124（對齊 GNU timeout），signal-only 回 1。
@@ -24,10 +24,10 @@
   - `npm run check` 通過：16 個檔案語法檢查、9 pass / 1 skip / 0 fail；Windows 跳過 PTY shell 整合測試。
   - LSP diagnostics 掃描 16 個 JS 檔，0 errors / 0 diagnostics。
   - `npm audit --omit=dev` 回報 0 vulnerabilities。
-  - `node src/index.js` 在目前工作區無法直接啟動，原因是 runtime secret/config 未建立：缺少 `keys/ssh_host_ed25519_key`；同時正式部署也需補 `config/users.json`、`config/commands.json`、`.env` 與 `storage/sftp` 權限。
+  - `node src/index.js` 在目前工作區無法直接啟動，原因是 runtime secret/config 未建立：缺少 `keys/ssh_host_ed25519_key`；同時正式部署也需補 `config/users.json`、`config/commands.json`、`.env` 與 `s12ryt/` 權限。
   - 結論：程式碼檢查通過，適合部署到支援長駐 TCP 服務的 Linux VM/VPS/systemd 環境；不適合 Vercel/Netlify 這類 HTTP serverless 平台。部署前需依 README Production Setup 建立 runtime 檔案與防火牆規則。
 - 一鍵啟動更新（2026-06-27）：
-  - 新增 `start.js` 作為 `npm start` 入口；會先建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、`keys/ssh_host_ed25519_key`，再 import `src/index.js`。
+  - 新增 `start.js` 作為 `npm start` 入口；會先建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`s12ryt/`、`keys/ssh_host_ed25519_key`，再 import `src/index.js`。
   - 安全分歧：`NODE_ENV=production` 缺 `config/users.json` 時直接中止，不自動建立預設開發帳號；需要直接跑舊入口可用 `npm run start:raw`。
 - SSH 預設連線用戶名更新（2026-06-28）：
   - `.env` 可設定 `SSH_DEFAULT_USERNAME=root`，用於 `npm start` / `npm run dev:setup` 自動建立缺少的開發用 `config/users.json`。
@@ -47,3 +47,10 @@
   - 新增 `Dockerfile` / `.dockerignore` / `.github/workflows/ghcr.yml`。
   - workflow 會在 push main、push `v*.*.*` tag、手動 workflow_dispatch 時推送到 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`；PR 只 build 不 push。
   - image 不包含真實 `.env`、`config/users.json`、`config/commands.json`、`keys/`、`storage/`，正式環境需用 volume 掛載 runtime config/secrets。
+- SSH stream 防護更新（2026-06-28）：
+  - 使用 `ssh2` client 呼叫 `client.shell()` 時，若 server 預設拒絕 shell，callback 會有 error 且 stream 可能是 undefined；README 已補正確檢查方式，避免 `stream.setEncoding()` TypeError。
+  - `server.js` 對 session/exec/shell/sftp accept 回傳空值加防護與 reject/log；`command-runner.js` 對缺少 `stream.stderr` 時 fallback 到主 stream。
+- SSH 使用者工作目錄更新（2026-06-28）：
+  - 使用者取消 Linux 虛擬終端/WSL 需求，改為不要 WSL、互動 shell 預設開啟。
+  - `SSH_ENABLE_SHELL` 預設改為 true，`SSH_SHELL_CWD` 與 `SSH_SFTP_ROOT` 預設改為 `./s12ryt`。
+  - `start.js` / `setup-dev.js` 會建立 `s12ryt/`；`.gitignore` / `.dockerignore` 排除該使用者工作目錄，Docker image 建立 `/app/s12ryt`。
