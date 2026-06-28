@@ -29,3 +29,17 @@
 - 一鍵啟動更新（2026-06-27）：
   - 新增 `start.js` 作為 `npm start` 入口；會先建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp`、`keys/ssh_host_ed25519_key`，再 import `src/index.js`。
   - 安全分歧：`NODE_ENV=production` 缺 `config/users.json` 時直接中止，不自動建立預設開發帳號；需要直接跑舊入口可用 `npm run start:raw`。
+- SSH 預設連線用戶名更新（2026-06-28）：
+  - `.env` 可設定 `SSH_DEFAULT_USERNAME=root`，用於 `npm start` / `npm run dev:setup` 自動建立缺少的開發用 `config/users.json`。
+  - `.env.example` 預設仍保留 `SSH_DEFAULT_USERNAME=deploy`；本機 `.env` 已設定為 `root`。
+  - 若 `config/users.json` 已存在，不會被 `SSH_DEFAULT_USERNAME` 覆蓋，避免破壞既有帳號與密碼；需手動改 `config/users.json`。
+  - 驗證：LSP diagnostics 0、`npm run check` 通過（17 syntax files、9 pass / 1 skip / 0 fail）。
+- SSH 預設開發密碼更新（2026-06-28）：
+  - `.env` / `.env.example` 新增 `SSH_DEFAULT_PASSWORD=ChangeMe123!`，用於自動建立缺少的開發用 `config/users.json`。
+  - `start.js` 與 `scripts/setup-dev.js` 會讀取 `SSH_DEFAULT_PASSWORD`，驗證至少 8 字元，寫入 `password` 欄位。
+  - 初始化日誌不再輸出明文密碼；若 `config/users.json` 已存在，不會被 `.env` 帳號或密碼覆蓋。
+- users.json 密碼欄位更新（2026-06-28）：
+  - 取消新格式中的 `passwordHash` 欄位，改用 `password`。
+  - 新增用戶可在 `password` 填明文密碼；`createAuthenticator()` 載入時會自動 bcrypt hash 並寫回同一個 `password` 欄位。
+  - 舊版 `passwordHash` 仍會自動遷移成 `password`，避免既有 users 檔直接失效。
+  - README 已補完整建立 `config/users.json` 教學與多用戶範例。
