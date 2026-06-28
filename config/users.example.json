@@ -1,7 +1,7 @@
 [
   {
     "username": "deploy",
-    "passwordHash": "$2a$12$replace-with-output-from-npm-run-hash-password",
+    "password": "ChangeMe123!",
     "authorizedKeys": [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleReplaceThisKey deploy@example"
     ]

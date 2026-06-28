@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import bcrypt from 'bcryptjs';
 import ssh2 from 'ssh2';
 import { createSshServer } from '../src/server.js';
 
@@ -101,7 +100,7 @@ function createTestWorkspace() {
   const keygen = spawnSync('ssh-keygen', ['-t', 'ed25519', '-f', hostKeyPath, '-N', '', '-C', 'test'], { stdio: 'ignore' });
   assert.equal(keygen.status, 0);
 
-  fs.writeFileSync(usersFile, JSON.stringify([{ username: 'deploy', passwordHash: bcrypt.hashSync('ChangeMe123!', 4), authorizedKeys: [] }]));
+  fs.writeFileSync(usersFile, JSON.stringify([{ username: 'deploy', password: 'ChangeMe123!', authorizedKeys: [] }]));
   fs.writeFileSync(commandsFile, JSON.stringify({ ping: { executable: process.execPath, args: ['-e', 'process.stdout.write("pong")'], timeoutMs: 5000 } }));
 
   return { workspace, hostKeyPath, usersFile, commandsFile, sftpRoot };
