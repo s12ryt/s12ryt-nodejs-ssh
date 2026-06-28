@@ -54,22 +54,104 @@ sftp -P 2222 deploy@127.0.0.1
 `npm start` 會透過 `start.js` 自動建立缺少的 `.env`、`config/commands.json`、開發用 `config/users.json`、`storage/sftp` 與 SSH host key，再啟動 server。
 `npm start` uses `start.js` to create missing `.env`, `config/commands.json`, development `config/users.json`, `storage/sftp`, and the SSH host key before starting the server.
 
-預設開發帳號為 `deploy / ChangeMe123!`。正式環境設定 `NODE_ENV=production` 時，若缺少 `config/users.json` 會直接中止，不會自動建立預設密碼帳號。
-The default development account is `deploy / ChangeMe123!`. With `NODE_ENV=production`, missing `config/users.json` stops startup instead of creating a default-password account.
+預設開發帳號為 `.env` 的 `SSH_DEFAULT_USERNAME` / `SSH_DEFAULT_PASSWORD`。正式環境設定 `NODE_ENV=production` 時，若缺少 `config/users.json` 會直接中止，不會自動建立預設密碼帳號。
+The default development account is `SSH_DEFAULT_USERNAME` / `SSH_DEFAULT_PASSWORD` from `.env`. With `NODE_ENV=production`, missing `config/users.json` stops startup instead of creating a default-password account.
+
+若已存在 `config/users.json`，修改 `SSH_DEFAULT_USERNAME` 或 `SSH_DEFAULT_PASSWORD` 不會覆蓋既有帳號；請手動更新 `config/users.json` 的 `username` 或 `password`。
+If `config/users.json` already exists, changing `SSH_DEFAULT_USERNAME` or `SSH_DEFAULT_PASSWORD` does not overwrite existing users; update `username` or `password` in `config/users.json` manually.
 
 ## 正式環境設定 Production Setup
 
 1. 複製 `.env.example` 為 `.env`。Copy `.env.example` to `.env`.
 2. 執行 `npm run generate:host-key` 產生 host key。Generate the host key.
-3. 執行 `npm run hash:password -- "你的強密碼"` 產生 bcrypt hash。Generate a bcrypt hash for your password.
-4. 複製 `config/users.example.json` 為 `config/users.json`，填入使用者、密碼 hash 與公鑰。Fill in users, password hashes, and public keys.
-5. 複製 `config/commands.example.json` 為 `config/commands.json`，只加入需要開放的命令。Add only the commands you want to expose.
-6. 確認 `keys/`、`config/users.json`、`.env` 權限只有服務帳號可讀。Restrict file permissions so only the service account can read secrets.
+3. 複製 `config/users.example.json` 為 `config/users.json`，填入使用者、密碼與公鑰。Fill in users, passwords, and public keys.
+4. 複製 `config/commands.example.json` 為 `config/commands.json`，只加入需要開放的命令。Add only the commands you want to expose.
+5. 確認 `keys/`、`config/users.json`、`.env` 權限只有服務帳號可讀。Restrict file permissions so only the service account can read secrets.
 
 也可以執行 `npm start` 讓 `start.js` 補齊非敏感範本與 host key；正式環境仍需先自行建立 `config/users.json`。
 You can also run `npm start` so `start.js` fills non-sensitive templates and the host key; production still requires you to create `config/users.json` first.
 
 > ⚠️ `config/users.json`、`config/commands.json`、`.env`、`keys/`、`storage/` 都已列入 `.gitignore`，請勿提交。These files are git-ignored and must never be committed.
+
+### 建立 `config/users.json` Create Users File
+
+`users.json` 是 SSH 登入帳號清單。新建使用者時可以直接填 `password` 明文；server 第一次載入時會自動把它轉成 bcrypt hash 並寫回同一個 `password` 欄位。
+`users.json` stores SSH login accounts. For a new user, put the plaintext value in `password`; on first load, the server automatically converts it to a bcrypt hash and writes it back to the same `password` field.
+
+建立檔案 Create the file:
+
+```bash
+cp config/users.example.json config/users.json
+```
+
+最小範例 Minimal example:
+
+```json
+[
+  {
+    "username": "root",
+    "password": "ChangeMe123!",
+    "authorizedKeys": []
+  }
+]
+```
+
+啟動後會自動變成類似下面這樣。After startup it is rewritten like this:
+
+```json
+[
+  {
+    "username": "root",
+    "password": "$2a$12$exampleHashGeneratedByTheServer",
+    "authorizedKeys": []
+  }
+]
+```
+
+連線帳號要對應 `username`。The SSH login name must match `username`:
+
+```bash
+ssh -p 2222 root@127.0.0.1 whoami
+sftp -P 2222 root@127.0.0.1
+```
+
+新增多個使用者時，在陣列中加入多筆物件。To add multiple users, add multiple objects:
+
+```json
+[
+  {
+    "username": "root",
+    "password": "ChangeMe123!",
+    "authorizedKeys": []
+  },
+  {
+    "username": "deploy",
+    "password": "AnotherStrongPassword123!",
+    "authorizedKeys": [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleReplaceThisKey deploy@example"
+    ]
+  }
+]
+```
+
+欄位說明 Field reference:
+
+| 欄位 Field | 必填 Required | 說明 Description |
+| --- | --- | --- |
+| `username` | 是 Yes | SSH 連線用戶名，例如 `root` 對應 `ssh root@host -p 2222`。SSH login username. |
+| `password` | 否 No | 密碼或已產生的 bcrypt hash；明文至少 8 字元，啟動後會自動 hash。Plain password or bcrypt hash; plaintext must be at least 8 characters and is auto-hashed on startup. |
+| `authorizedKeys` | 否 No | SSH 公鑰清單；不用公鑰登入時可填空陣列。SSH public keys; use an empty array when not using key auth. |
+
+注意事項 Notes:
+
+- 不要再使用 `passwordHash`；舊檔案仍會自動遷移成 `password`，但新檔案請只填 `password`。
+- `password` 欄位若已是 bcrypt hash，server 不會重複 hash。
+- 修改密碼時，可以直接把 `password` 改回新的明文密碼，重啟 server 後會自動 hash。
+- 正式環境請限制 `config/users.json` 權限，因為第一次啟動前檔案內可能短暫含有明文密碼。
+- Do not use `passwordHash` for new files; legacy files are migrated automatically.
+- If `password` is already a bcrypt hash, the server will not hash it again.
+- To change a password, replace `password` with a new plaintext password and restart the server.
+- Restrict `config/users.json` permissions in production because it may briefly contain plaintext before first startup.
 
 ## 互動式 Shell Interactive Shell
 
@@ -113,6 +195,8 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 | --- | --- | --- |
 | `SSH_HOST` | `0.0.0.0` | 監聽位址 Listen address |
 | `SSH_PORT` | `2222` | 監聽埠 Listen port |
+| `SSH_DEFAULT_USERNAME` | `deploy` | 自動建立開發用 `config/users.json` 時使用的連線帳號，例如 `root`。Username used only when auto-creating the development users file. |
+| `SSH_DEFAULT_PASSWORD` | `ChangeMe123!` | 自動建立開發用 `config/users.json` 時使用的初始密碼，至少 8 字元；server 首次載入後會自動 hash。Initial password for the auto-created development users file, minimum 8 characters; auto-hashed on first server load. |
 | `SSH_HOST_KEY_PATH` | `./keys/ssh_host_ed25519_key` | Host key 路徑 |
 | `SSH_USERS_FILE` | `./config/users.json` | 使用者設定 Users file |
 | `SSH_COMMANDS_FILE` | `./config/commands.json` | 命令白名單 Commands file |
