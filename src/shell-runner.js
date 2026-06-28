@@ -29,10 +29,15 @@ function createShellEnv(context) {
 
 export function createShellRunner(config, logger) {
   const shellPath = config.shellPath || defaultShellPath();
-  const shellCwd = config.shellCwd || os.homedir();
+  const shellCwd = config.shellCwd || process.cwd();
+
+  function stderrFor(stream) {
+    return stream.stderr || stream;
+  }
 
   return {
     start(stream, ptyInfo = {}, context = {}) {
+      const stderr = stderrFor(stream);
       const cols = normalizePositiveInteger(ptyInfo.cols, DEFAULT_COLS);
       const rows = normalizePositiveInteger(ptyInfo.rows, DEFAULT_ROWS);
       const term = ptyInfo.term || 'xterm-256color';
@@ -51,7 +56,7 @@ export function createShellRunner(config, logger) {
         });
       } catch (error) {
         logger.error('Interactive shell failed to start', { username: context.username, shellPath, error: error.message });
-        stream.stderr.write(`Failed to start shell: ${error.message}\n`);
+        stderr.write(`Failed to start shell: ${error.message}\n`);
         stream.exit(1);
         stream.end();
         return {

@@ -133,7 +133,7 @@ test('SSH server accepts password auth and runs whitelisted exec', { skip: !hasS
   });
 });
 
-test('SSH server rejects shell sessions by default', { skip: !hasSshKeygen() }, async () => {
+test('SSH server rejects shell sessions when shell is disabled', { skip: !hasSshKeygen() }, async () => {
   await withServer({}, async ({ port }) => {
     await assert.rejects(connectShell({ port, command: 'echo should-not-run\nexit\n' }));
   });

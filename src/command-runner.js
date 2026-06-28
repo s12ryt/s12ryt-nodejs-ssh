@@ -13,6 +13,10 @@ function splitCommandLine(commandLine) {
 export function createCommandRunner(commandsFile, logger) {
   const commands = JSON.parse(fs.readFileSync(commandsFile, 'utf8'));
 
+  function stderrFor(stream) {
+    return stream.stderr || stream;
+  }
+
   function getCommand(commandName) {
     const command = commands[commandName];
     if (!command?.executable) {
@@ -23,9 +27,10 @@ export function createCommandRunner(commandsFile, logger) {
 
   return {
     run(commandLine, stream, context = {}) {
+      const stderr = stderrFor(stream);
       const [commandName, ...clientArgs] = splitCommandLine(String(commandLine || '').trim());
       if (!commandName) {
-        stream.stderr.write('Empty command is not allowed\n');
+        stderr.write('Empty command is not allowed\n');
         stream.exit(2);
         stream.end();
         return;
@@ -36,7 +41,7 @@ export function createCommandRunner(commandsFile, logger) {
         command = getCommand(commandName);
       } catch (error) {
         logger.warn('Rejected command', { username: context.username, commandName });
-        stream.stderr.write(`${error.message}\n`);
+        stderr.write(`${error.message}\n`);
         stream.exit(127);
         stream.end();
         return;
@@ -59,7 +64,7 @@ export function createCommandRunner(commandsFile, logger) {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        stream.stderr.write(`Command timed out after ${timeoutMs}ms\n`);
+        stderr.write(`Command timed out after ${timeoutMs}ms\n`);
         child.kill('SIGTERM');
       }, timeoutMs);
 
@@ -74,11 +79,11 @@ export function createCommandRunner(commandsFile, logger) {
       }
 
       child.stdout.pipe(stream, { end: false });
-      child.stderr.pipe(stream.stderr, { end: false });
+      child.stderr.pipe(stderr, { end: false });
 
       child.on('error', (error) => {
         logger.error('Command failed to start', { username: context.username, commandName, error: error.message });
-        stream.stderr.write(`Failed to start command: ${error.message}\n`);
+        stderr.write(`Failed to start command: ${error.message}\n`);
         finish(1);
       });
 

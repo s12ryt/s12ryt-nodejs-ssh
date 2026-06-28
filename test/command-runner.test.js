@@ -30,6 +30,22 @@ function createMockStream() {
   return stream;
 }
 
+function createMockStreamWithoutStderr() {
+  const chunks = [];
+  const stream = new Writable({
+    write(chunk, encoding, callback) {
+      chunks.push(Buffer.from(chunk).toString());
+      callback();
+    }
+  });
+  stream.exitCode = undefined;
+  stream.exit = (code) => {
+    stream.exitCode = code;
+  };
+  stream.output = () => chunks.join('');
+  return stream;
+}
+
 test('command runner rejects commands outside whitelist', async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'commands-')), 'commands.json');
   fs.writeFileSync(file, JSON.stringify({ allowed: { executable: process.execPath, args: ['-e', 'console.log(1)'] } }));
@@ -79,4 +95,16 @@ test('command runner exits cleanly without exit code collisions on error', async
 
   assert.equal(stream.exitCode, 1);
   assert.match(stream.errorOutput(), /Failed to start/);
+});
+
+test('command runner falls back to main stream when stderr is unavailable', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'commands-')), 'commands.json');
+  fs.writeFileSync(file, JSON.stringify({ allowed: { executable: process.execPath, args: ['-e', 'console.log(1)'] } }));
+  const runner = createCommandRunner(file, { warn() {}, error() {}, info() {} });
+  const stream = createMockStreamWithoutStderr();
+
+  runner.run('not-allowed', stream, { username: 'u' });
+
+  assert.equal(stream.exitCode, 127);
+  assert.match(stream.output(), /not allowed/);
 });

@@ -52,13 +52,24 @@ export function createSshServer(config, logger) {
       client.on('ready', () => {
         logger.info('Client authenticated', { username: context.username, ip: info.ip });
 
-        client.on('session', (accept) => {
+        client.on('session', (accept, reject) => {
           const session = accept();
+          if (!session) {
+            logger.warn('Rejected session because no channel was available', { username: context.username, ip: info.ip });
+            reject?.();
+            return;
+          }
+
           let ptyInfo;
           let activeShell;
 
           session.on('exec', (execAccept, reject, info) => {
             const stream = execAccept();
+            if (!stream) {
+              logger.warn('Rejected exec because no stream was available', { username: context.username, command: info?.command });
+              reject?.();
+              return;
+            }
             commandRunner.run(info.command, stream, context);
           });
 
@@ -69,6 +80,11 @@ export function createSshServer(config, logger) {
             }
 
             const stream = acceptShell();
+            if (!stream) {
+              logger.warn('Rejected shell because no stream was available', { username: context.username });
+              rejectShell?.();
+              return;
+            }
             activeShell = shellRunner.start(stream, ptyInfo, context);
           });
 
@@ -87,8 +103,13 @@ export function createSshServer(config, logger) {
             activeShell?.close();
           });
 
-          session.on('sftp', (acceptSftp) => {
+          session.on('sftp', (acceptSftp, rejectSftp) => {
             const sftp = acceptSftp();
+            if (!sftp) {
+              logger.warn('Rejected SFTP because no subsystem stream was available', { username: context.username });
+              rejectSftp?.();
+              return;
+            }
             logger.info('SFTP session started', { username: context.username });
             attachSftpServer(sftp, config.sftpRoot, logger, context);
           });
