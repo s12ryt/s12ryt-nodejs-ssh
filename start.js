@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 process.chdir(root);
 
-const defaultPassword = 'ChangeMe123!';
+const defaultUsernameFallback = 'deploy';
+const defaultPasswordFallback = 'ChangeMe123!';
 const envPath = path.join(root, '.env');
 const envExamplePath = path.join(root, '.env.example');
 const commandsExamplePath = path.join(root, 'config', 'commands.example.json');
@@ -28,6 +28,22 @@ function isProduction() {
 function resolveRuntimePath(envName, fallback) {
   const value = process.env[envName] || fallback;
   return path.resolve(root, value);
+}
+
+function readDefaultUsername() {
+  const username = (process.env.SSH_DEFAULT_USERNAME || defaultUsernameFallback).trim();
+  if (!username) {
+    throw new Error('SSH_DEFAULT_USERNAME must not be empty');
+  }
+  return username;
+}
+
+function readDefaultPassword() {
+  const password = process.env.SSH_DEFAULT_PASSWORD || defaultPasswordFallback;
+  if (password.length < 8) {
+    throw new Error('SSH_DEFAULT_PASSWORD must be at least 8 characters');
+  }
+  return password;
 }
 
 function copyIfMissing(source, target) {
@@ -75,14 +91,16 @@ function ensureUsersFile() {
 
   if (isProduction()) {
     throw new Error(
-      `Missing ${path.relative(root, usersPath)}. Create production users first with npm run hash:password.`
+      `Missing ${path.relative(root, usersPath)}. Create production users first from config/users.example.json.`
     );
   }
 
-  const users = [{ username: 'deploy', passwordHash: bcrypt.hashSync(defaultPassword, 12), authorizedKeys: [] }];
+  const username = readDefaultUsername();
+  const password = readDefaultPassword();
+  const users = [{ username, password, authorizedKeys: [] }];
   fs.mkdirSync(path.dirname(usersPath), { recursive: true });
   fs.writeFileSync(usersPath, `${JSON.stringify(users, null, 2)}\n`);
-  log(`Created ${path.relative(root, usersPath)} with development user deploy / ${defaultPassword}`);
+  log(`Created ${path.relative(root, usersPath)} with development user ${username}`);
 }
 
 function ensureHostKey() {
