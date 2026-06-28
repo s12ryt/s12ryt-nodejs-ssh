@@ -22,13 +22,13 @@
   - 建立 .github/workflows/ci.yml（ubuntu × node 20.x/22.x matrix，npm ci + npm run check）。
   - 擴充 .gitignore（補 config/users.json、config/commands.json）。
   - 重新同步 package-lock.json（0 vulnerabilities）。
-  - 安全掃描確認無敏感檔外洩（無 users.json/commands.json/keys/.env/storage）。
+  - 安全掃描確認無敏感檔外洩（無 users.json/commands.json/keys/.env/runtime workspace）。
   - git init → commit → push 到 GitHub main 成功，遠端檔案已驗證完整。
 - [x] 部署可行性檢查（2026-06-27）：
   - `npm run check` 通過（16 syntax files、9 pass / 1 skip / 0 fail）。
   - LSP diagnostics：16 JS files、0 diagnostics。
   - `npm audit --omit=dev`：0 vulnerabilities。
-  - `node src/index.js` 驗證到預期阻塞：缺少 `keys/ssh_host_ed25519_key`，需正式部署時建立 host key、users.json、commands.json、.env 與 storage 權限。
+  - `node src/index.js` 驗證到預期阻塞：缺少 `keys/ssh_host_ed25519_key`，需正式部署時建立 host key、users.json、commands.json、.env 與 runtime workspace 權限。
   - 判定：程式碼可部署到 Linux VM/VPS/systemd 類長駐 TCP 環境；runtime 機密/config 補齊前不能直接啟動。
 - [x] 一鍵啟動腳本（2026-06-27）：
   - 新增根目錄 `start.js`，啟動前自動補 `.env`、`config/commands.json`、開發用 `config/users.json`、`s12ryt/`、SSH host key。
@@ -53,7 +53,7 @@
   - README 新增詳細 `config/users.json` 建立教學、欄位說明、多用戶範例、改密碼方式與權限注意事項。
 - [x] GHCR image workflow（2026-06-28）：
   - 新增 `Dockerfile`，使用 Node 20 Debian slim，多階段安裝 production dependencies，runtime 安裝 `openssh-client` 供 `start.js` 產生 host key。
-  - 新增 `.dockerignore`，排除 `.env`、真實 config、keys、storage、node_modules、test、agent 等不應進 image 的內容。
+  - 新增 `.dockerignore`，排除 `.env`、真實 config、keys、runtime workspace、node_modules、test、agent 等不應進 image 的內容。
   - 新增 `.github/workflows/ghcr.yml`，使用 Docker Buildx、metadata-action、build-push-action，push main/tag/manual 會推送 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`，PR 僅建置驗證。
   - README 補 GHCR image pull/run 範例與 runtime secrets 掛載提醒。
 - [x] SSH stream TypeError 防護（2026-06-28）：
@@ -66,3 +66,6 @@
   - `SSH_ENABLE_SHELL` 預設改為 true，避免一般 SSH shell request 被拒造成 client 端 undefined stream。
   - `SSH_SHELL_CWD` 與 `SSH_SFTP_ROOT` 預設改為 `./s12ryt`，使用者透過 SSH 執行 `npm install`、下載或產生的檔案集中在專案 `s12ryt/`。
   - `start.js` / `scripts/setup-dev.js` 會自動建立 `s12ryt/`；`.gitignore`、`.dockerignore` 與 Dockerfile 同步更新。
+- [x] Docker 部署 README 詳細教學（2026-06-28）：
+  - Container Image 章節補完整部署流程：建立部署目錄、建立 users/commands 設定、`docker run`、連線測試、Docker Compose、更新容器與 troubleshooting。
+  - 補安全提醒：`config/users.json` 初次啟動前可能有明文密碼、`keys/` 需持久保存、`s12ryt/` 是使用者工作資料、對外開放需防火牆限制。

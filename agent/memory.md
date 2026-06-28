@@ -46,7 +46,7 @@
 - GHCR container image 自動建置（2026-06-28）：
   - 新增 `Dockerfile` / `.dockerignore` / `.github/workflows/ghcr.yml`。
   - workflow 會在 push main、push `v*.*.*` tag、手動 workflow_dispatch 時推送到 `ghcr.io/s12ryt/s12ryt-nodejs-ssh`；PR 只 build 不 push。
-  - image 不包含真實 `.env`、`config/users.json`、`config/commands.json`、`keys/`、`storage/`，正式環境需用 volume 掛載 runtime config/secrets。
+  - image 不包含真實 `.env`、`config/users.json`、`config/commands.json`、`keys/`、`s12ryt/`，正式環境需用 volume 掛載 runtime config/secrets 與使用者工作目錄。
 - SSH stream 防護更新（2026-06-28）：
   - 使用 `ssh2` client 呼叫 `client.shell()` 時，若 server 預設拒絕 shell，callback 會有 error 且 stream 可能是 undefined；README 已補正確檢查方式，避免 `stream.setEncoding()` TypeError。
   - `server.js` 對 session/exec/shell/sftp accept 回傳空值加防護與 reject/log；`command-runner.js` 對缺少 `stream.stderr` 時 fallback 到主 stream。
@@ -54,3 +54,6 @@
   - 使用者取消 Linux 虛擬終端/WSL 需求，改為不要 WSL、互動 shell 預設開啟。
   - `SSH_ENABLE_SHELL` 預設改為 true，`SSH_SHELL_CWD` 與 `SSH_SFTP_ROOT` 預設改為 `./s12ryt`。
   - `start.js` / `setup-dev.js` 會建立 `s12ryt/`；`.gitignore` / `.dockerignore` 排除該使用者工作目錄，Docker image 建立 `/app/s12ryt`。
+- Docker 部署文件更新（2026-06-28）：
+  - README 的 Container Image 章節已擴充為完整 Docker 部署教學：部署目錄、users/commands 設定、docker run、docker compose、更新流程、權限安全與 troubleshooting。
+  - 文件強調 runtime secrets/config/keys/s12ryt 工作目錄都需用 volume 掛載，不 bake 進 image。
