@@ -4,9 +4,9 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
 
-> 生產級 Node.js 20 SSH server，支援密碼認證、公鑰認證、白名單命令執行與 SFTP。預設不開放互動式 shell，避免生產環境被當成任意遠端執行入口。
+> 生產級 Node.js 20 SSH server，支援密碼認證、公鑰認證、白名單命令執行、預設互動式 shell 與 SFTP，使用 `s12ryt/` 作為 SSH/SFTP 工作目錄。
 >
-> A production-ready Node.js 20 SSH server with password / public-key auth, whitelisted command execution, and sandboxed SFTP. Interactive shell is disabled by default so the service cannot be turned into an arbitrary remote-execution endpoint.
+> A production-ready Node.js 20 SSH server with password / public-key auth, whitelisted command execution, interactive shell, and sandboxed SFTP using `s12ryt/` as the SSH/SFTP workspace.
 
 繁體中文為主，每節附 English summary。
 
@@ -72,7 +72,7 @@ If `config/users.json` already exists, changing `SSH_DEFAULT_USERNAME` or `SSH_D
 也可以執行 `npm start` 讓 `start.js` 補齊非敏感範本與 host key；正式環境仍需先自行建立 `config/users.json`。
 You can also run `npm start` so `start.js` fills non-sensitive templates and the host key; production still requires you to create `config/users.json` first.
 
-> ⚠️ `config/users.json`、`config/commands.json`、`.env`、`keys/`、`storage/` 都已列入 `.gitignore`，請勿提交。These files are git-ignored and must never be committed.
+> ⚠️ `config/users.json`、`config/commands.json`、`.env`、`keys/`、`s12ryt/` 都已列入 `.gitignore`，請勿提交。These files are git-ignored and must never be committed.
 
 ### 建立 `config/users.json` Create Users File
 
@@ -173,8 +173,8 @@ Windows is not emulated as Linux. Without `SSH_SHELL_PATH`, Windows uses the sys
 若關閉 shell，shell request 會被拒絕，仍可使用白名單 `exec` 與 SFTP。
 When shell is disabled, shell requests are rejected while whitelisted `exec` and SFTP keep working.
 
-若使用 `ssh2` client 呼叫 `client.shell()`，請先檢查 callback 的 `error`；預設未啟用 shell 時 `stream` 會是 `undefined`，直接呼叫 `stream.setEncoding()` 會造成 `TypeError`。
-When using the `ssh2` client with `client.shell()`, check the callback `error` first. With shell disabled by default, `stream` is `undefined`; calling `stream.setEncoding()` directly will throw `TypeError`.
+若使用 `ssh2` client 呼叫 `client.shell()`，請先檢查 callback 的 `error`；當你用 `SSH_ENABLE_SHELL=false` 關閉 shell 時，`stream` 會是 `undefined`，直接呼叫 `stream.setEncoding()` 會造成 `TypeError`。
+When using the `ssh2` client with `client.shell()`, check the callback `error` first. When shell is disabled with `SSH_ENABLE_SHELL=false`, `stream` is `undefined`; calling `stream.setEncoding()` directly will throw `TypeError`.
 
 ```js
 client.shell((error, stream) => {
@@ -232,14 +232,66 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 每次 push 到 `main` 或推送 `v*.*.*` tag 時，GitHub Actions 會自動建置並推送 GHCR image。
 GitHub Actions automatically builds and pushes the GHCR image on pushes to `main` and `v*.*.*` tags.
 
+映像名稱 Image name:
+
 ```bash
 docker pull ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 ```
 
-常用執行範例 Example run:
+### Docker 部署教學 Docker Deployment
+
+容器內固定使用 `/app` 作為工作目錄，SSH 服務預設監聽容器內 `2222` port。正式部署時，請把 runtime 檔案從主機掛載進容器，不要把真實密碼、host key 或使用者工作檔案放進 image。
+The container uses `/app` as its working directory and listens on container port `2222` by default. Mount runtime files from the host in production; do not bake real passwords, host keys, or user workspace files into the image.
+
+1. 建立部署目錄。Create a deployment directory:
 
 ```bash
-docker run --rm -p 2222:2222 \
+mkdir -p s12ryt-ssh/config s12ryt-ssh/keys s12ryt-ssh/s12ryt
+cd s12ryt-ssh
+```
+
+2. 建立 `config/users.json`。Create `config/users.json`:
+
+```bash
+cat > config/users.json <<'JSON'
+[
+  {
+    "username": "root",
+    "password": "ChangeMe123!",
+    "authorizedKeys": []
+  }
+]
+JSON
+```
+
+第一次啟動後，`password` 會自動改寫成 bcrypt hash。請把範例密碼換成自己的強密碼。
+After the first startup, `password` is rewritten as a bcrypt hash. Replace the example password with your own strong password.
+
+3. 建立 `config/commands.json`。Create `config/commands.json`:
+
+```bash
+cat > config/commands.json <<'JSON'
+{
+  "whoami": {
+    "executable": "whoami",
+    "args": [],
+    "allowClientArgs": false,
+    "timeoutMs": 5000
+  }
+}
+JSON
+```
+
+互動式 shell 預設已啟用；`commands.json` 只影響 `ssh user@host command` 這類 exec 命令。
+Interactive shell is enabled by default; `commands.json` only affects exec commands such as `ssh user@host command`.
+
+4. 啟動容器。Start the container:
+
+```bash
+docker run -d --name s12ryt-ssh \
+  --restart unless-stopped \
+  -p 2222:2222 \
+  -e NODE_ENV=production \
   -v ./config/users.json:/app/config/users.json:ro \
   -v ./config/commands.json:/app/config/commands.json:ro \
   -v ./keys:/app/keys \
@@ -247,8 +299,97 @@ docker run --rm -p 2222:2222 \
   ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 ```
 
-正式環境請自行掛載 `config/users.json`、`config/commands.json`、`keys/` 與 `s12ryt/`；不要把真實密碼、公鑰、host key 或使用者工作檔案 bake 進 image。
-Mount `config/users.json`, `config/commands.json`, `keys/`, and `s12ryt/` in production; do not bake real credentials, host keys, or user workspace files into the image.
+`keys/` 掛載為可寫，讓 `start.js` 能在第一次啟動時自動產生 SSH host key。`s12ryt/` 是 SSH shell 與 SFTP 的使用者工作目錄。
+`keys/` is mounted writable so `start.js` can generate the SSH host key on first startup. `s12ryt/` is the user workspace for SSH shell and SFTP.
+
+5. 檢查日誌與連線。Check logs and connect:
+
+```bash
+docker logs -f s12ryt-ssh
+ssh -p 2222 root@127.0.0.1
+sftp -P 2222 root@127.0.0.1
+```
+
+若部署在遠端主機，請把 `127.0.0.1` 換成主機 IP 或網域。
+When deployed on a remote host, replace `127.0.0.1` with the server IP or domain.
+
+### Docker Compose
+
+```yaml
+services:
+  ssh:
+    image: ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
+    container_name: s12ryt-ssh
+    restart: unless-stopped
+    ports:
+      - "2222:2222"
+    environment:
+      NODE_ENV: production
+      SSH_HOST: 0.0.0.0
+      SSH_PORT: 2222
+      SSH_USERS_FILE: /app/config/users.json
+      SSH_COMMANDS_FILE: /app/config/commands.json
+      SSH_HOST_KEY_PATH: /app/keys/ssh_host_ed25519_key
+      SSH_SFTP_ROOT: /app/s12ryt
+      SSH_ENABLE_SHELL: "true"
+      SSH_SHELL_CWD: /app/s12ryt
+      SSH_MAX_CLIENTS: 3
+    volumes:
+      - ./config/users.json:/app/config/users.json:ro
+      - ./config/commands.json:/app/config/commands.json:ro
+      - ./keys:/app/keys
+      - ./s12ryt:/app/s12ryt
+```
+
+啟動與查看狀態。Start and inspect:
+
+```bash
+docker compose up -d
+docker compose logs -f ssh
+docker compose ps
+```
+
+### 更新容器 Update
+
+```bash
+docker pull ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
+docker stop s12ryt-ssh
+docker rm s12ryt-ssh
+docker run -d --name s12ryt-ssh \
+  --restart unless-stopped \
+  -p 2222:2222 \
+  -e NODE_ENV=production \
+  -v ./config/users.json:/app/config/users.json:ro \
+  -v ./config/commands.json:/app/config/commands.json:ro \
+  -v ./keys:/app/keys \
+  -v ./s12ryt:/app/s12ryt \
+  ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
+```
+
+使用 Compose 時：With Compose:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### 權限與安全 Permissions and Security
+
+- `config/users.json` 可能在第一次啟動前短暫包含明文密碼，請限制主機上的檔案權限。
+- `keys/` 內的 host key 必須持久保存；刪除後重新產生會讓 SSH client 出現 host key changed 警告。
+- `s12ryt/` 會保存使用者透過 shell/SFTP 建立、下載或安裝的檔案，更新 image 不會清掉它。
+- 若要對外開放 `2222`，請搭配防火牆或雲端 security group，只允許可信 IP。
+- `config/commands.json` 不要加入 `sh -c`、`cmd /c`、`powershell -Command` 這類 shell 包裝器。
+
+### 常見問題 Troubleshooting
+
+| 問題 Problem | 檢查方式 Check |
+| --- | --- |
+| 容器馬上退出 | 執行 `docker logs s12ryt-ssh`，通常是缺少或格式錯誤的 `config/users.json` / `config/commands.json`。 |
+| SSH 連不上 | 確認 `docker ps` 有 `0.0.0.0:2222->2222/tcp`，並檢查主機防火牆。 |
+| 密碼登入失敗 | 確認 SSH 用戶名等於 `config/users.json` 的 `username`，且 `password` 至少 8 字元或已是 bcrypt hash。 |
+| SFTP 看不到檔案 | 檔案根目錄是掛載的 `./s12ryt`，不是 repo 根目錄。 |
+| SSH client 警告 host key changed | 檢查 `./keys` 是否被刪除或換過；需要保留同一份 host key。 |
 
 ## 專案結構 Project Structure
 
@@ -260,7 +401,7 @@ Mount `config/users.json`, `config/commands.json`, `keys/`, and `s12ryt/` in pro
 | `src/command-runner.js` | 白名單命令執行。Whitelisted command execution. |
 | `src/sftp-server.js` | SFTP 協議實作。SFTP protocol implementation. |
 | `src/fs-safe.js` | SFTP 路徑沙箱。SFTP path sandboxing. |
-| `src/shell-runner.js` | 可選 PTY 互動 shell。Optional PTY interactive shell. |
+| `src/shell-runner.js` | 預設啟用的 PTY 互動 shell。PTY interactive shell enabled by default. |
 | `src/config.js` | 環境變數讀取與驗證。Env config loading/validation. |
 | `src/logger.js` | JSON 結構化日誌。Structured JSON logging. |
 | `scripts/` | 初始化、密碼雜湊、host key 產生工具。Setup utilities. |
