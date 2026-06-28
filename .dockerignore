@@ -1,0 +1,13 @@
+.git
+.github
+agent
+coverage
+node_modules
+npm-debug.log*
+.env
+config/users.json
+config/commands.json
+keys
+storage
+test
+*.local
