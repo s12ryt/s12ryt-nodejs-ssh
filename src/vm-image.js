@@ -1,10 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { ensureQemuRuntime, qemuCommandEnvironment } from './vm-runtime.js';
+import { ensureQemuRuntime, qemuCommandEnvironment, runRuntimeCommand } from './vm-runtime.js';
 
 const GIB = 1024 ** 3;
 
@@ -16,28 +15,6 @@ export function checksumForFile(checksums, filename) {
     }
   }
   throw new Error(`No SHA-512 checksum found for ${filename}`);
-}
-
-function runCommand(binary, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { shell: false, windowsHide: true, ...options });
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk;
-    });
-    child.once('error', reject);
-    child.once('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`${binary} exited with status ${code}: ${stderr.trim() || stdout.trim()}`));
-      }
-    });
-  });
 }
 
 async function fetchChecked(url, options) {
@@ -110,7 +87,7 @@ async function downloadImage(config, logger) {
 }
 
 export async function ensureVmImage(config, logger, dependencies = {}) {
-  const run = dependencies.runCommand || runCommand;
+  const run = dependencies.runCommand || runRuntimeCommand;
   const prepareRuntime = dependencies.ensureQemuRuntime || ensureQemuRuntime;
   fs.mkdirSync(path.dirname(config.imagePath), { recursive: true });
   ensureFreeDisk(path.dirname(config.imagePath), config.minHostFreeGb);

@@ -4,6 +4,16 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
 const QEMU_PACKAGES = ['qemu-system-x86', 'qemu-utils', 'qemu-system-data', 'seabios'];
+const MAX_COMMAND_OUTPUT_CHARS = 256 * 1024;
+
+function appendOutputTail(current, chunk) {
+  const value = chunk.toString();
+  if (value.length >= MAX_COMMAND_OUTPUT_CHARS) {
+    return value.slice(-MAX_COMMAND_OUTPUT_CHARS);
+  }
+  const overflow = current.length + value.length - MAX_COMMAND_OUTPUT_CHARS;
+  return `${overflow > 0 ? current.slice(overflow) : current}${value}`;
+}
 
 export function runRuntimeCommand(binary, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -39,10 +49,10 @@ export function runRuntimeCommand(binary, args, options = {}) {
     }
 
     child.stdout.on('data', (chunk) => {
-      stdout += chunk;
+      stdout = appendOutputTail(stdout, chunk);
     });
     child.stderr.on('data', (chunk) => {
-      stderr += chunk;
+      stderr = appendOutputTail(stderr, chunk);
     });
     child.once('error', (error) => finish(error));
     child.once('close', (code, signal) => {

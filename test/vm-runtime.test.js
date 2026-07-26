@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ensureQemuRuntime, qemuCommandEnvironment } from '../src/vm-runtime.js';
+import { ensureQemuRuntime, qemuCommandEnvironment, runRuntimeCommand } from '../src/vm-runtime.js';
 
 function silentLogger() {
   return { info() {}, warn() {} };
@@ -157,4 +157,17 @@ test('qemuCommandEnvironment prepends private runtime libraries', () => {
 
   assert.equal(environment.LD_LIBRARY_PATH, `/runtime/lib:/runtime/usr/lib${path.delimiter}/existing`);
   assert.equal(environment.PATH, '/usr/bin');
+});
+
+test('runRuntimeCommand bounds captured output while preserving the tail', async () => {
+  const marker = '__OUTPUT_END__';
+  const result = await runRuntimeCommand(process.execPath, [
+    '-e',
+    `process.stdout.write('x'.repeat(400000) + '${marker}'); process.stderr.write('y'.repeat(400000) + '${marker}')`
+  ]);
+
+  assert.ok(result.stdout.length <= 256 * 1024);
+  assert.ok(result.stderr.length <= 256 * 1024);
+  assert.ok(result.stdout.endsWith(marker));
+  assert.ok(result.stderr.endsWith(marker));
 });
