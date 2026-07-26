@@ -136,3 +136,8 @@
   - exec channel 中斷會終止 child；逾時 child 忽略 SIGTERM 時於 1 秒後升級 SIGKILL。
   - runtime stdout/stderr 各保留最後 256 KiB；QEMU console 單行最多 64 KiB，startup error 最近 20 行、每行 4096 字元。
   - 驗證：31 個 src/test JS 檔 LSP 0 diagnostics；`npm run check` 64 pass / 5 skip / 0 fail；audit 0 vulnerabilities；1000 次 exec 中斷後 active handles 0 → 0、強制 GC heap 增量約 474 KiB。
+- [x] GitHub 推送與 CI 修復（2026-07-26）：
+  - 將資源生命週期優化整理為 9 個原子提交並推送至 `origin/main`。
+  - 修復 Linux PTY 測試將 shell 輸入回顯誤判為執行完成的競態，marker 改為兩段輸出後再比對完整值。
+  - 移除 force-kill safety timer 的 `unref()`，確保 fake child 與真實 child 都會執行 SIGKILL 升級。
+  - 最終程式 commit `98090247e547c809690809184b5f250849fe4d05`：CI run `30183220986` 與 GHCR Image run `30183220981` 均成功。

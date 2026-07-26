@@ -127,3 +127,7 @@
   - QMP、SSH probe、QEMU spawn handshake、metadata listen 與 console parser 在 settle/detach 時移除 listeners，避免完成後仍由長生命週期 socket/child/server 持有 Promise closure。
   - 驗證：LSP src 17 檔 + test 14 檔皆 0 diagnostics；`npm run check` 36 syntax files、64 pass / 5 Windows skip / 0 fail；`npm audit --omit=dev` 0 vulnerabilities；`git diff --check` 通過。
   - `node --expose-gc` 重複 1000 次 exec channel 中斷：active handles 0 → 0，三次強制 GC 後 heap 4,498,232 → 4,983,336 bytes（+485,104 bytes，約 474 KiB）。
+- GitHub CI 修復與推送（2026-07-26）：
+  - 首次推送資源優化後，Linux integration test 因 PTY 會回顯尚未執行的 `printf marker`，SFTP 過早啟動而讀到原 cwd；將 marker 拆成兩段由 shell 合成，完整 marker 只會出現在真正執行輸出。
+  - command-runner force-kill timer 原本 `unref()`，fake child 沒有 OS handle 時 Node test 會在 SIGKILL 前結束並回報 `cancelledByParent`；移除 `unref()` 後 timer 由 child close 正常清除，並保證強制終止一定執行。
+  - 程式最終 commit `98090247e547c809690809184b5f250849fe4d05` 已推送至 `origin/main`；GitHub Actions CI（Node 20.x / 22.x）run `30183220986` success，GHCR Image run `30183220981` success。
