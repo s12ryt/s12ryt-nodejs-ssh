@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
+import { loadVmConfig, validateVmServicePorts } from './vm-config.js';
 
 dotenv.config();
 
@@ -49,17 +50,21 @@ export function loadConfig() {
     usersFile: resolveFromRoot(process.env.SSH_USERS_FILE || './config/users.json'),
     commandsFile: resolveFromRoot(process.env.SSH_COMMANDS_FILE || './config/commands.json'),
     sftpRoot: resolveFromRoot(process.env.SSH_SFTP_ROOT || './s12ryt'),
+    sftpFollowShellCwd: readBoolean('SSH_SFTP_FOLLOW_SHELL_CWD', true),
     enableShell: readBoolean('SSH_ENABLE_SHELL', true),
     shellPath: process.env.SSH_SHELL_PATH || undefined,
     shellCwd: resolveFromRoot(process.env.SSH_SHELL_CWD || './s12ryt'),
     maxClients: readInteger('SSH_MAX_CLIENTS', 3, { min: 1, max: 100 }),
     readyTimeoutMs: readInteger('SSH_READY_TIMEOUT_MS', 20000, { min: 1000 }),
-    logLevel: process.env.SSH_LOG_LEVEL || 'info'
+    logLevel: process.env.SSH_LOG_LEVEL || 'info',
+    vm: loadVmConfig(rootDir)
   };
 
   if (!fs.existsSync(config.hostKeyPath)) {
     throw new Error(`SSH host key not found: ${config.hostKeyPath}`);
   }
+
+  validateVmServicePorts(config.vm, config.port);
 
   fs.mkdirSync(config.sftpRoot, { recursive: true });
   fs.mkdirSync(config.shellCwd, { recursive: true });

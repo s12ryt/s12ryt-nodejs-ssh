@@ -90,6 +90,74 @@ function connectShell({ port, command, window = { term: 'xterm-256color', cols: 
   });
 }
 
+function connectShellAndSftp({ port, shellCommand, marker, runSftp }) {
+  return new Promise((resolve, reject) => {
+    const client = new Client();
+    let output = '';
+    let startedSftp = false;
+    let settled = false;
+
+    function finish(error, result) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      client.end();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(result);
+    }
+
+    client
+      .on('ready', () => {
+        client.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (shellError, stream) => {
+          if (shellError) {
+            finish(shellError);
+            return;
+          }
+          stream.on('data', (chunk) => {
+            output += chunk.toString();
+            if (startedSftp || !output.includes(marker)) {
+              return;
+            }
+            startedSftp = true;
+            client.sftp((sftpError, sftp) => {
+              if (sftpError) {
+                finish(sftpError);
+                return;
+              }
+              Promise.resolve(runSftp(sftp))
+                .then((result) => {
+                  sftp.end();
+                  stream.write('exit\n');
+                  finish(undefined, result);
+                })
+                .catch((error) => finish(error));
+            });
+          });
+          stream.on('error', finish);
+          stream.write(shellCommand);
+        });
+      })
+      .on('error', finish)
+      .connect({ host: '127.0.0.1', port, username: 'deploy', password: 'ChangeMe123!', readyTimeout: 5000 });
+  });
+}
+
+function sftpRealpath(sftp, requestedPath) {
+  return new Promise((resolve, reject) => {
+    sftp.realpath(requestedPath, (error, resolvedPath) => (error ? reject(error) : resolve(resolvedPath)));
+  });
+}
+
+function sftpWriteFile(sftp, filename, data) {
+  return new Promise((resolve, reject) => {
+    sftp.writeFile(filename, data, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
 function createTestWorkspace() {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-server-'));
   const hostKeyPath = path.join(workspace, 'ssh_host_ed25519_key');
@@ -148,4 +216,72 @@ test('SSH server runs enabled interactive shell through PTY', { skip: !hasSshKey
     assert.equal(result.code, 0);
     assert.match(result.output, /shell-ok/);
   });
+});
+
+test('SSH server default POSIX shell supports bash process substitution', { skip: !hasSshKeygen() || process.platform === 'win32' || !fs.existsSync('/bin/bash') }, async () => {
+  await withServer({ enableShell: true }, async ({ port }) => {
+    const result = await connectShell({ port, command: 'printf "shell:%s\\n" "$SHELL"\nprintf "ps:%s\\n" <(printf x)\nexit\n' });
+    assert.equal(result.code, 0);
+    assert.match(result.output, /shell:\/bin\/bash/);
+    assert.match(result.output, /ps:\/dev\/fd\//);
+  });
+});
+
+test('SFTP follows the current shell cwd on the same SSH connection', { skip: !hasSshKeygen() || process.platform !== 'linux' || !fs.existsSync('/bin/bash') }, async () => {
+  await withServer({ enableShell: true, shellPath: '/bin/bash', sftpFollowShellCwd: true }, async ({ port, workspace }) => {
+    const target = path.join(workspace, 'shell-current');
+    fs.mkdirSync(target);
+    const marker = '__shell_cwd_ready__';
+    const quotedTarget = `'${target.replaceAll("'", "'\\''")}'`;
+
+    const resolvedPath = await connectShellAndSftp({
+      port,
+      marker,
+      shellCommand: `cd -- ${quotedTarget}\nprintf '${marker}\\n'\n`,
+      async runSftp(sftp) {
+        const currentPath = await sftpRealpath(sftp, '.');
+        await sftpWriteFile(sftp, 'from-sftp.txt', Buffer.from('followed'));
+        return currentPath;
+      }
+    });
+
+    assert.equal(resolvedPath, target);
+    assert.equal(fs.readFileSync(path.join(target, 'from-sftp.txt'), 'utf8'), 'followed');
+  });
+});
+
+test('SFTP maps FreeRoot guest paths through inherited PROOT_CONFIG', { skip: !hasSshKeygen() || process.platform !== 'linux' || !fs.existsSync('/bin/bash') }, async () => {
+  const previousProotConfig = process.env.PROOT_CONFIG;
+  try {
+    await withServer({ enableShell: true, shellPath: '/bin/bash', sftpFollowShellCwd: true }, async ({ port, workspace }) => {
+      const rootfs = path.join(workspace, 'freeroot');
+      const rootHome = path.join(rootfs, 'root');
+      const configPath = path.join(rootfs, 'usr', 'local', '.config', 'proot.yml');
+      fs.mkdirSync(rootHome, { recursive: true });
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, `rootfs: ${rootfs}\ncwd: /root\nroot: true\nbindings:\n  - /proc\n`);
+      process.env.PROOT_CONFIG = configPath;
+
+      const marker = '__freeroot_ready__';
+      const resolvedPath = await connectShellAndSftp({
+        port,
+        marker,
+        shellCommand: `cd -- '${rootHome}'\nprintf '${marker}\\n'\n`,
+        async runSftp(sftp) {
+          const currentPath = await sftpRealpath(sftp, '.');
+          await sftpWriteFile(sftp, '/root/from-sftp.txt', Buffer.from('freeroot-mapped'));
+          return currentPath;
+        }
+      });
+
+      assert.equal(resolvedPath, '/root');
+      assert.equal(fs.readFileSync(path.join(rootHome, 'from-sftp.txt'), 'utf8'), 'freeroot-mapped');
+    });
+  } finally {
+    if (previousProotConfig === undefined) {
+      delete process.env.PROOT_CONFIG;
+    } else {
+      process.env.PROOT_CONFIG = previousProotConfig;
+    }
+  }
 });

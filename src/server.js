@@ -27,6 +27,7 @@ export function createSshServer(config, logger) {
 
       activeClients += 1;
       const context = { username: undefined, ip: info.ip };
+      const activeShells = new Set();
       logger.info('Client connected', { ip: info.ip, activeClients });
 
       client.on('authentication', (ctx) => {
@@ -86,6 +87,7 @@ export function createSshServer(config, logger) {
               return;
             }
             activeShell = shellRunner.start(stream, ptyInfo, context);
+            activeShells.add(activeShell);
           });
 
           session.on('pty', (acceptPty, rejectPty, info) => {
@@ -101,6 +103,7 @@ export function createSshServer(config, logger) {
 
           session.on('close', () => {
             activeShell?.close();
+            activeShells.delete(activeShell);
           });
 
           session.on('sftp', (acceptSftp, rejectSftp) => {
@@ -111,7 +114,18 @@ export function createSshServer(config, logger) {
               return;
             }
             logger.info('SFTP session started', { username: context.username });
-            attachSftpServer(sftp, config.sftpRoot, logger, context);
+            attachSftpServer(sftp, config.sftpRoot, logger, context, {
+              followShellCwd: config.sftpFollowShellCwd,
+              defaultCwd: config.shellCwd,
+              getShellCwd() {
+                const shells = Array.from(activeShells);
+                return shells.at(-1)?.getCwd?.();
+              },
+              getShellPathContext() {
+                const shells = Array.from(activeShells);
+                return shells.at(-1)?.getPathContext?.();
+              }
+            });
           });
         });
       });
