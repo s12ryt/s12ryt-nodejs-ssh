@@ -107,7 +107,6 @@ export function createCommandRunner(commandsFile, logger, dependencies = {}) {
             child.kill('SIGKILL');
           }
         }, killGraceMs);
-        forceKillTimer.unref?.();
       }
 
       function cancelForDisconnect() {
