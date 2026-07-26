@@ -135,8 +135,16 @@ export async function startMetadataServer(config, logger, options = {}) {
   });
 
   await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
+    function onListening() {
+      server.off('error', onError);
+      resolve();
+    }
+    function onError(error) {
+      server.off('listening', onListening);
+      reject(error);
+    }
+    server.once('error', onError);
+    server.listen(0, '127.0.0.1', onListening);
   });
   const address = server.address();
   const guestBaseUrl = `http://10.0.2.2:${address.port}/${token}/`;
