@@ -8,6 +8,14 @@
 
 ### Fixed 修復
 
+- `vm-metadata` / `vm-manager`：密碼 provisioning 會寫入 OpenSSH drop-in，root 帳號明確允許密碼登入；新增 cloud-init `phone_home` completion gate，避免只看到 SSH banner 就過早寫 marker，並提升 schema fingerprint 讓舊磁碟自動重新套用修正。Fixed VM root password login and wait for cloud-init final completion before declaring readiness.
+- `vm-manager` / `vm-metadata`：QEMU 啟動期間新增 metadata/SSH 階段與 30 秒進度日誌，持續監控延遲退出，錯誤附最近 console，並可取消 metadata timer、SSH socket 與重試迴圈，修復停在 `Starting QEMU TCG VM` 無診斷及退出後仍等待 timeout。Added cancellable, stage-aware VM startup diagnostics and continuous QEMU exit monitoring.
+- `proot-paths` / `shell-runner` / `sftp-server`：自動從 Linux 前景程序的 `PROOT_CONFIG` 偵測 Mytai20100/freeroot，解析 `proot.yml` 的 rootfs/cwd/bindings，讓 SFTP guest 路徑與 FreeRoot 實體檔案雙向映射。Added automatic FreeRoot PRoot guest/host path translation.
+- `sftp-server` / `shell-runner`：新增預設開啟的 `SSH_SFTP_FOLLOW_SHELL_CWD`；同一 SSH connection 的 SFTP 相對路徑會動態跟隨 Linux shell 前景程序 cwd，絕對路徑可直接存取容器檔案系統，關閉設定時保留原 SFTP root 沙箱。Added same-connection shell cwd tracking for SFTP with an opt-out sandbox mode.
+- `shell-runner`：依 Node.js 程序的實際 OS UID 設定 `USER`、`LOGNAME`、`HOME`；有效 UID 為 0 時使用 `/root`，修復 FeatherPanel root shell 仍把腳本寫到 `/home/container` 的問題。Derive shell identity variables from the real process UID and use `/root` for effective UID 0.
+- `shell-runner`：Linux/macOS 未指定 `SSH_SHELL_PATH` 時改為優先使用 Bash/Zsh，並把 `SHELL` 環境變數同步為實際 shell，修復 `/bin/sh` 導致方向鍵歷史與 `bash <(curl ...)` 類腳本不相容的問題。Prefer Bash/Zsh for default POSIX interactive shells and expose the selected shell via `SHELL`.
+- `start` / `generate:host-key`：當 `ssh-keygen` 在 FeatherPanel 等容器中因 `No user exists for uid ...` 失敗時，改用 Node.js crypto 產生 RSA host key，避免啟動前直接崩潰。Added Node.js crypto host-key fallback when `ssh-keygen` fails in containers with unmapped UIDs.
+- `shell-runner`：將 PTY 依賴從 `node-pty` 換成 `@homebridge/node-pty-prebuilt-multiarch`，保留互動 shell 並優先使用預編譯 binary，降低 FeatherPanel 低磁碟容器內 node-gyp rebuild 失敗機率。Switched the PTY dependency to a prebuilt multiarch package to keep interactive shells while reducing low-disk install failures.
 - `sftp-server`：handle ID 由 `handles.size + 1` 改為單調遞增計數器，修復刪除 handle 後 ID 重用導致的 entry 覆蓋與檔案描述符洩漏。Fixed SFTP handle ID reuse causing entry collisions and fd leaks.
 - `command-runner`：以 `settled` 旗標避免 `error` 與 `close` 重複呼叫 exit；timeout 統一回退碼 124（對齊 GNU `timeout`），純 signal 結束回 1。Hardened exit handling and standardized timeout exit code to 124.
 - `logger`：調整欄位合併順序，避免 meta 覆蓋系統欄位（`time`/`level`/`message`）。Prevented metadata from overriding reserved log fields.
@@ -19,6 +27,8 @@
 
 ### Added 新增
 
+- 新增 rootless QEMU runtime bootstrap：當 FeatherPanel 缺少 QEMU 時，從既有 Debian-compatible APT repository 驗證並下載套件至 `vm/runtime`，以原子 staging 啟用，不修改系統套件。Added signed APT-based private QEMU runtime installation for source deployments without root access.
+- 新增可選 QEMU TCG Debian 12 VM：官方 qcow2 自動下載與 SHA-512 驗證、NoCloud SSH 初始化、RAM/CPU/磁碟 `.env` 控制、2223 guest SSH/SFTP、QMP graceful shutdown 與 Docker QEMU runtime。Added an optional resource-controlled no-KVM Debian VM lifecycle.
 - 開源準備：README（中英雙語）、GPL-3.0 LICENSE、SECURITY.md、CONTRIBUTING.md、CODE_OF_CONDUCT.md、GitHub Actions CI。Open-source scaffolding.
 - `command-runner` 新增逾時（exit 124）與啟動失敗的回歸測試。Regression tests for timeout and spawn failure.
 
