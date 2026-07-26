@@ -10,8 +10,9 @@ function splitCommandLine(commandLine) {
   return parts;
 }
 
-export function createCommandRunner(commandsFile, logger) {
+export function createCommandRunner(commandsFile, logger, dependencies = {}) {
   const commands = JSON.parse(fs.readFileSync(commandsFile, 'utf8'));
+  const spawnProcess = dependencies.spawnProcess || spawn;
 
   function stderrFor(stream) {
     return stream.stderr || stream;
@@ -52,42 +53,97 @@ export function createCommandRunner(commandsFile, logger) {
         args.push(...clientArgs);
       }
 
-      const child = spawn(command.executable, args, {
+      const child = spawnProcess(command.executable, args, {
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { PATH: process.env.PATH }
       });
 
       const timeoutMs = Number.isInteger(command.timeoutMs) ? command.timeoutMs : 10000;
+      const killGraceMs = dependencies.killGraceMs ?? 1000;
       let settled = false;
       let timedOut = false;
+      let disconnected = false;
+      let forceKillTimer;
 
       const timer = setTimeout(() => {
         timedOut = true;
-        stderr.write(`Command timed out after ${timeoutMs}ms\n`);
-        child.kill('SIGTERM');
+        if (!stream.destroyed) {
+          stderr.write(`Command timed out after ${timeoutMs}ms\n`);
+        }
+        terminateChild();
       }, timeoutMs);
 
+      function releaseResources() {
+        clearTimeout(timer);
+        clearTimeout(forceKillTimer);
+        child.stdout?.unpipe(stream);
+        child.stderr?.unpipe(stderr);
+        stream.off('close', onStreamClose);
+        stream.off('error', onStreamError);
+      }
+
       function finish(exitCode) {
+        clearTimeout(forceKillTimer);
         if (settled) {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        releaseResources();
+        if (disconnected || stream.destroyed) {
+          return;
+        }
         stream.exit(exitCode);
         stream.end();
       }
 
-      child.stdout.pipe(stream, { end: false });
-      child.stderr.pipe(stderr, { end: false });
+      function terminateChild() {
+        if (child.exitCode != null || child.signalCode != null) {
+          return;
+        }
+        child.kill('SIGTERM');
+        forceKillTimer = setTimeout(() => {
+          if (child.exitCode == null && child.signalCode == null) {
+            child.kill('SIGKILL');
+          }
+        }, killGraceMs);
+        forceKillTimer.unref?.();
+      }
 
-      child.on('error', (error) => {
+      function cancelForDisconnect() {
+        if (settled) {
+          return;
+        }
+        disconnected = true;
+        settled = true;
+        releaseResources();
+        terminateChild();
+      }
+
+      function onStreamClose() {
+        cancelForDisconnect();
+      }
+
+      function onStreamError() {
+        cancelForDisconnect();
+      }
+
+      child.stdout?.pipe(stream, { end: false });
+      child.stderr?.pipe(stderr, { end: false });
+      stream.once('close', onStreamClose);
+      stream.once('error', onStreamError);
+
+      child.once('error', (error) => {
         logger.error('Command failed to start', { username: context.username, commandName, error: error.message });
+        if (disconnected) {
+          clearTimeout(forceKillTimer);
+          return;
+        }
         stderr.write(`Failed to start command: ${error.message}\n`);
         finish(1);
       });
 
-      child.on('close', (code, signal) => {
+      child.once('close', (code, signal) => {
         logger.info('Command finished', { username: context.username, commandName, code, signal, timedOut });
         const exitCode = timedOut ? 124 : (code ?? (signal ? 1 : 0));
         finish(exitCode);

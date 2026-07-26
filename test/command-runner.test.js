@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { Writable } from 'node:stream';
 import { createCommandRunner } from '../src/command-runner.js';
 
@@ -107,4 +109,62 @@ test('command runner falls back to main stream when stderr is unavailable', asyn
 
   assert.equal(stream.exitCode, 127);
   assert.match(stream.output(), /not allowed/);
+});
+
+test('command runner releases the child and pipes when the SSH stream closes', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'commands-')), 'commands.json');
+  fs.writeFileSync(file, JSON.stringify({ slow: { executable: 'fake-command', timeoutMs: 20 } }));
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const killedWith = [];
+  child.kill = (signal) => {
+    killedWith.push(signal);
+    child.signalCode = signal;
+    queueMicrotask(() => child.emit('close', null, signal));
+  };
+  const runner = createCommandRunner(file, { warn() {}, error() {}, info() {} }, {
+    spawnProcess: () => child
+  });
+  const stream = createMockStream();
+
+  runner.run('slow', stream, { username: 'u' });
+  stream.emit('close');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.deepEqual(killedWith, ['SIGTERM']);
+  assert.equal(child.stdout.listenerCount('data'), 0);
+  assert.equal(child.stderr.listenerCount('data'), 0);
+  assert.equal(stream.listenerCount('close'), 0);
+  assert.equal(stream.listenerCount('error'), 0);
+  assert.doesNotMatch(stream.errorOutput(), /timed out/);
+});
+
+test('command runner force kills a timed out child that ignores SIGTERM', async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'commands-')), 'commands.json');
+  fs.writeFileSync(file, JSON.stringify({ slow: { executable: 'fake-command', timeoutMs: 10 } }));
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.exitCode = null;
+  child.signalCode = null;
+  const killedWith = [];
+  child.kill = (signal) => {
+    killedWith.push(signal);
+    if (signal === 'SIGKILL') {
+      child.signalCode = signal;
+      queueMicrotask(() => child.emit('close', null, signal));
+    }
+  };
+  const runner = createCommandRunner(file, { warn() {}, error() {}, info() {} }, {
+    spawnProcess: () => child,
+    killGraceMs: 10
+  });
+  const stream = createMockStream();
+
+  runner.run('slow', stream, { username: 'u' });
+  await new Promise((resolve) => stream.on('finish', resolve));
+
+  assert.deepEqual(killedWith, ['SIGTERM', 'SIGKILL']);
+  assert.equal(stream.exitCode, 124);
 });
