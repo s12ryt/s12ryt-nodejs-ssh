@@ -130,3 +130,9 @@
   - README 已涵蓋 shell/SFTP、FreeRoot、QEMU TCG、rootless runtime、cloud-init completion 與 VM root 密碼修復。
   - 以 16 個原子提交整理程式、測試、部署與文件變更，排除 `agent/t.md` 與 `s12ryt-nodejs-ssh.zip`。
   - 推送至 `origin/main` 成功；遠端 commit 為 `1c3be227ba6d753fb23a81586b52862bb123ac70`。
+- [x] Node.js 記憶體與資源生命週期優化（2026-07-26）：
+  - SFTP 改為 50 筆批次目錄串流、64 KiB partial read，並在 end/close/error 關閉所有 file/dir handles。
+  - PTY、exec、QMP、SSH probe、QEMU console 與 metadata startup 完成後顯式解除 listener、pipe、subscription 及 timer。
+  - exec channel 中斷會終止 child；逾時 child 忽略 SIGTERM 時於 1 秒後升級 SIGKILL。
+  - runtime stdout/stderr 各保留最後 256 KiB；QEMU console 單行最多 64 KiB，startup error 最近 20 行、每行 4096 字元。
+  - 驗證：31 個 src/test JS 檔 LSP 0 diagnostics；`npm run check` 64 pass / 5 skip / 0 fail；audit 0 vulnerabilities；1000 次 exec 中斷後 active handles 0 → 0、強制 GC heap 增量約 474 KiB。

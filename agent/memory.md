@@ -120,3 +120,10 @@
   - README 與本輪完整功能、測試及維護文件已整理為 16 個 semantic atomic commits 並推送至 `origin/main`。
   - 首次推送範圍為 `07f9b00..1c3be22`，本機與遠端 commit 均確認為 `1c3be227ba6d753fb23a81586b52862bb123ac70`。
   - 按使用者要求保留且未提交 `agent/t.md`、`s12ryt-nodejs-ssh.zip`。
+- 記憶體與資源生命週期優化（2026-07-26）：
+  - SFTP 不再一次載入整個目錄及所有 stat；使用 `fs.Dir` 每批讀取 50 筆，READ 最多配置 64 KiB，channel end/close/error 統一清 file fd、directory handle 與 listeners。
+  - shell runner 顯式 dispose PTY onData/onExit subscriptions；client/session close 會關閉活動 shell；exec 中斷會 unpipe、清 timer、SIGTERM child，必要時 1 秒後 SIGKILL。
+  - `runRuntimeCommand` stdout/stderr 各限制 256 KiB tail；QEMU console parser 以 `StringDecoder` 處理 UTF-8，logger 單行上限 64 KiB，startup error 只持有最近 20 行且每行最多 4096 字元。
+  - QMP、SSH probe、QEMU spawn handshake、metadata listen 與 console parser 在 settle/detach 時移除 listeners，避免完成後仍由長生命週期 socket/child/server 持有 Promise closure。
+  - 驗證：LSP src 17 檔 + test 14 檔皆 0 diagnostics；`npm run check` 36 syntax files、64 pass / 5 Windows skip / 0 fail；`npm audit --omit=dev` 0 vulnerabilities；`git diff --check` 通過。
+  - `node --expose-gc` 重複 1000 次 exec channel 中斷：active handles 0 → 0，三次強制 GC 後 heap 4,498,232 → 4,983,336 bytes（+485,104 bytes，約 474 KiB）。
