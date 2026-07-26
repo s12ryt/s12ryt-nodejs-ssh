@@ -7,7 +7,12 @@ import { prootGuestPathToHost, prootHostPathToGuest } from './proot-paths.js';
 
 const { OPEN_MODE, STATUS_CODE } = ssh2.utils.sftp;
 const { OK, EOF, NO_SUCH_FILE, PERMISSION_DENIED, FAILURE } = STATUS_CODE;
-const MAX_READ_LENGTH = 1024 * 1024;
+const MAX_READ_LENGTH = 64 * 1024;
+const DIRECTORY_BATCH_SIZE = 50;
+const SFTP_REQUEST_EVENTS = [
+  'REALPATH', 'STAT', 'LSTAT', 'OPENDIR', 'READDIR', 'OPEN', 'READ', 'WRITE',
+  'CLOSE', 'REMOVE', 'MKDIR', 'RMDIR', 'RENAME'
+];
 
 function normalizedClientPath(absolutePath) {
   return absolutePath.replaceAll('\\', '/');
@@ -77,6 +82,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
   const handles = new Map();
   let nextHandleId = 1;
   const followShellCwd = options.followShellCwd ?? true;
+  let closed = false;
 
   function createHandle(entry) {
     const handle = Buffer.alloc(4);
@@ -95,6 +101,47 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
     const entry = handles.get(key);
     handles.delete(key);
     return entry;
+  }
+
+  function closeEntry(entry) {
+    if (!entry || entry.closed) {
+      return;
+    }
+    entry.closed = true;
+    try {
+      if (entry.type === 'file') {
+        fs.closeSync(entry.fd);
+      } else if (entry.type === 'dir') {
+        entry.directory.closeSync();
+      }
+    } catch (error) {
+      if (error.code !== 'EBADF' && error.code !== 'ERR_DIR_CLOSED') {
+        logger.warn('Failed to close SFTP handle', { username: context.username, error: error.message });
+      }
+    }
+  }
+
+  function cleanup() {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    sftp.off('end', cleanup);
+    sftp.off('close', cleanup);
+    sftp.off('error', onSftpError);
+    for (const event of SFTP_REQUEST_EVENTS) {
+      sftp.removeAllListeners(event);
+    }
+    for (const entry of handles.values()) {
+      closeEntry(entry);
+    }
+    handles.clear();
+    logger.info('SFTP session ended', { username: context.username });
+  }
+
+  function onSftpError(error) {
+    logger.warn('SFTP session error', { username: context.username, error: error.message });
+    cleanup();
   }
 
   function pathContext() {
@@ -146,12 +193,8 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
   sftp.on('OPENDIR', (reqid, givenPath) => {
     try {
       const absolutePath = safeResolve(givenPath);
-      const entries = fs.readdirSync(absolutePath, { withFileTypes: true }).map((dirent) => {
-        const entryPath = path.join(absolutePath, dirent.name);
-        const stats = fs.statSync(entryPath);
-        return { filename: dirent.name, longname: toLongName(dirent.name, stats), attrs: toAttrs(stats) };
-      });
-      sftp.handle(reqid, createHandle({ type: 'dir', entries, offset: 0 }));
+      const directory = fs.opendirSync(absolutePath);
+      sftp.handle(reqid, createHandle({ type: 'dir', directory, path: absolutePath, closed: false }));
     } catch (error) {
       sftp.status(reqid, statusForError(error));
     }
@@ -163,13 +206,31 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
       sftp.status(reqid, FAILURE);
       return;
     }
-    if (entry.offset >= entry.entries.length) {
+    if (entry.eof) {
       sftp.status(reqid, EOF);
       return;
     }
-    const batch = entry.entries.slice(entry.offset, entry.offset + 50);
-    entry.offset += batch.length;
-    sftp.name(reqid, batch);
+    try {
+      const batch = [];
+      while (batch.length < DIRECTORY_BATCH_SIZE) {
+        const dirent = entry.directory.readSync();
+        if (!dirent) {
+          entry.eof = true;
+          closeEntry(entry);
+          break;
+        }
+        const entryPath = path.join(entry.path, dirent.name);
+        const stats = fs.statSync(entryPath);
+        batch.push({ filename: dirent.name, longname: toLongName(dirent.name, stats), attrs: toAttrs(stats) });
+      }
+      if (batch.length === 0) {
+        sftp.status(reqid, EOF);
+        return;
+      }
+      sftp.name(reqid, batch);
+    } catch (error) {
+      sftp.status(reqid, statusForError(error));
+    }
   });
 
   sftp.on('OPEN', (reqid, filename, flags) => {
@@ -192,8 +253,11 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
       return;
     }
     const readLength = Math.min(length, MAX_READ_LENGTH);
-    const buffer = Buffer.alloc(readLength);
+    const buffer = Buffer.allocUnsafe(readLength);
     fs.read(entry.fd, buffer, 0, readLength, offset, (error, bytesRead) => {
+      if (closed) {
+        return;
+      }
       if (error) {
         sftp.status(reqid, statusForError(error));
         return;
@@ -213,6 +277,9 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
       return;
     }
     fs.write(entry.fd, data, 0, data.length, offset, (error) => {
+      if (closed) {
+        return;
+      }
       sftp.status(reqid, error ? statusForError(error) : OK);
     });
   });
@@ -223,10 +290,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
       sftp.status(reqid, FAILURE);
       return;
     }
-    if (entry.type === 'file') {
-      fs.close(entry.fd, () => sftp.status(reqid, OK));
-      return;
-    }
+    closeEntry(entry);
     sftp.status(reqid, OK);
   });
 
@@ -262,14 +326,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
     }
   });
 
-  sftp.on('end', () => {
-    for (const handle of handles.keys()) {
-      const entry = handles.get(handle);
-      if (entry?.type === 'file') {
-        fs.closeSync(entry.fd);
-      }
-    }
-    handles.clear();
-    logger.info('SFTP session ended', { username: context.username });
-  });
+  sftp.once('end', cleanup);
+  sftp.once('close', cleanup);
+  sftp.once('error', onSftpError);
 }
