@@ -1,17 +1,22 @@
 import net from 'node:net';
 
-export function sendQmpCommand(socketPath, execute, timeoutMs = 3000) {
+export function sendQmpCommand(socketPath, execute, timeoutMs = 3000, dependencies = {}) {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
+    const createConnection = dependencies.createConnection || net.createConnection;
+    const socket = createConnection(socketPath);
     let buffer = '';
     let stage = 'greeting';
-    const timeout = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`QMP command timed out: ${execute}`));
-    }, timeoutMs);
+    let settled = false;
+    const timeout = setTimeout(() => finish(new Error(`QMP command timed out: ${execute}`)), timeoutMs);
 
     function finish(error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
       clearTimeout(timeout);
+      socket.off('data', onData);
+      socket.off('error', finish);
       socket.destroy();
       if (error) {
         reject(error);
@@ -21,8 +26,12 @@ export function sendQmpCommand(socketPath, execute, timeoutMs = 3000) {
     }
 
     socket.setEncoding('utf8');
-    socket.on('data', (chunk) => {
+    function onData(chunk) {
       buffer += chunk;
+      if (buffer.length > 256 * 1024) {
+        finish(new Error('QMP response exceeded 256 KiB'));
+        return;
+      }
       while (buffer.includes('\n')) {
         const newline = buffer.indexOf('\n');
         const line = buffer.slice(0, newline).trim();
@@ -48,7 +57,8 @@ export function sendQmpCommand(socketPath, execute, timeoutMs = 3000) {
           finish();
         }
       }
-    });
+    }
+    socket.on('data', onData);
     socket.once('error', finish);
   });
 }

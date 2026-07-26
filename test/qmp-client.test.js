@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { sendQmpCommand } from '../src/qmp-client.js';
 
 test('sendQmpCommand negotiates capabilities before powerdown', { skip: process.platform === 'win32' }, async () => {
@@ -33,4 +34,26 @@ test('sendQmpCommand negotiates capabilities before powerdown', { skip: process.
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(socketPath, { force: true });
   }
+});
+
+test('sendQmpCommand removes socket listeners after completion', async () => {
+  const socket = new EventEmitter();
+  const writes = [];
+  socket.setEncoding = () => {};
+  socket.write = (value) => writes.push(JSON.parse(value));
+  socket.destroy = () => {};
+
+  const command = sendQmpCommand('unused', 'system_powerdown', 1000, {
+    createConnection: () => socket
+  });
+  socket.emit('data', [
+    JSON.stringify({ QMP: { version: {}, capabilities: [] } }),
+    JSON.stringify({ return: {} }),
+    JSON.stringify({ return: {} })
+  ].join('\r\n') + '\r\n');
+
+  await command;
+  assert.deepEqual(writes.map((message) => message.execute), ['qmp_capabilities', 'system_powerdown']);
+  assert.equal(socket.listenerCount('data'), 0);
+  assert.equal(socket.listenerCount('error'), 0);
 });
