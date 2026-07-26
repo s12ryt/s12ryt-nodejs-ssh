@@ -15,7 +15,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client \
+  && apt-get install -y --no-install-recommends openssh-client qemu-system-x86 qemu-utils \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=dependencies /app/node_modules ./node_modules
@@ -26,10 +26,10 @@ COPY src ./src
 COPY scripts ./scripts
 COPY config/*.example.json ./config/
 
-RUN mkdir -p /app/config /app/keys /app/s12ryt \
+RUN mkdir -p /app/config /app/keys /app/s12ryt /app/vm \
   && chown -R node:node /app
 
 USER node
-EXPOSE 2222
+EXPOSE 2222 2223
 
 CMD ["node", "start.js"]
