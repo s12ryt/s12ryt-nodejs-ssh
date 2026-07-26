@@ -3,10 +3,34 @@ import path from 'node:path';
 import { constants } from 'node:fs';
 import ssh2 from 'ssh2';
 import { resolveInsideRoot } from './fs-safe.js';
+import { prootGuestPathToHost, prootHostPathToGuest } from './proot-paths.js';
 
 const { OPEN_MODE, STATUS_CODE } = ssh2.utils.sftp;
 const { OK, EOF, NO_SUCH_FILE, PERMISSION_DENIED, FAILURE } = STATUS_CODE;
 const MAX_READ_LENGTH = 1024 * 1024;
+
+function normalizedClientPath(absolutePath) {
+  return absolutePath.replaceAll('\\', '/');
+}
+
+export function resolveSftpPath({ root, requestedPath = '.', followShellCwd = true, shellCwd, proot }) {
+  if (!followShellCwd) {
+    return resolveInsideRoot(root, requestedPath);
+  }
+  const basePath = shellCwd || root;
+  if (proot) {
+    const guestCwd = prootHostPathToGuest(proot, basePath) || proot.cwd || '/';
+    const guestPath = requestedPath.startsWith('/')
+      ? path.posix.resolve('/', requestedPath)
+      : path.posix.resolve(guestCwd, requestedPath.replaceAll('\\', '/'));
+    return prootGuestPathToHost(proot, guestPath);
+  }
+  return path.resolve(basePath, requestedPath.replaceAll('\\', '/'));
+}
+
+export function sftpClientPath(absolutePath, proot) {
+  return prootHostPathToGuest(proot, absolutePath) || normalizedClientPath(absolutePath);
+}
 
 function toAttrs(stats) {
   return {
@@ -49,9 +73,10 @@ function statusForError(error) {
   return FAILURE;
 }
 
-export function attachSftpServer(sftp, root, logger, context = {}) {
+export function attachSftpServer(sftp, root, logger, context = {}, options = {}) {
   const handles = new Map();
   let nextHandleId = 1;
+  const followShellCwd = options.followShellCwd ?? true;
 
   function createHandle(entry) {
     const handle = Buffer.alloc(4);
@@ -72,15 +97,31 @@ export function attachSftpServer(sftp, root, logger, context = {}) {
     return entry;
   }
 
-  function safeResolve(givenPath) {
-    return resolveInsideRoot(root, givenPath || '.');
+  function pathContext() {
+    return options.getShellPathContext?.() || {
+      cwd: options.getShellCwd?.() || options.defaultCwd || root,
+      proot: undefined
+    };
+  }
+
+  function safeResolve(givenPath, context = pathContext()) {
+    return resolveSftpPath({
+      root,
+      requestedPath: givenPath || '.',
+      followShellCwd,
+      shellCwd: context.cwd || options.defaultCwd || root,
+      proot: context.proot
+    });
   }
 
   sftp.on('REALPATH', (reqid, givenPath) => {
     try {
-      const absolutePath = safeResolve(givenPath);
-      const relativePath = path.relative(root, absolutePath).replaceAll('\\', '/') || '.';
-      sftp.name(reqid, [{ filename: `/${relativePath}`, longname: `/${relativePath}`, attrs: toAttrs(fs.statSync(absolutePath)) }]);
+      const context = pathContext();
+      const absolutePath = safeResolve(givenPath, context);
+      const clientPath = followShellCwd
+        ? sftpClientPath(absolutePath, context.proot)
+        : `/${path.relative(root, absolutePath).replaceAll('\\', '/') || '.'}`;
+      sftp.name(reqid, [{ filename: clientPath, longname: clientPath, attrs: toAttrs(fs.statSync(absolutePath)) }]);
     } catch (error) {
       sftp.status(reqid, statusForError(error));
     }
