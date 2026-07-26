@@ -119,10 +119,7 @@ function connectShellAndSftp({ port, shellCommand, marker, runSftp }) {
           }
           stream.on('data', (chunk) => {
             output += chunk.toString();
-            const markerReceived = output
-              .split(/\r?\n/)
-              .some((line) => line.trim() === marker);
-            if (startedSftp || !markerReceived) {
+            if (startedSftp || !output.includes(marker)) {
               return;
             }
             startedSftp = true;
@@ -240,7 +237,7 @@ test('SFTP follows the current shell cwd on the same SSH connection', { skip: !h
     const resolvedPath = await connectShellAndSftp({
       port,
       marker,
-      shellCommand: `cd -- ${quotedTarget}\nprintf '${marker}\\n'\n`,
+      shellCommand: `cd -- ${quotedTarget}\nprintf '%s%s\\n' '__shell_cwd_' 'ready__'\n`,
       async runSftp(sftp) {
         const currentPath = await sftpRealpath(sftp, '.');
         await sftpWriteFile(sftp, 'from-sftp.txt', Buffer.from('followed'));
@@ -269,7 +266,7 @@ test('SFTP maps FreeRoot guest paths through inherited PROOT_CONFIG', { skip: !h
       const resolvedPath = await connectShellAndSftp({
         port,
         marker,
-        shellCommand: `cd -- '${rootHome}'\nprintf '${marker}\\n'\n`,
+        shellCommand: `cd -- '${rootHome}'\nprintf '%s%s\\n' '__freeroot_' 'ready__'\n`,
         async runSftp(sftp) {
           const currentPath = await sftpRealpath(sftp, '.');
           await sftpWriteFile(sftp, '/root/from-sftp.txt', Buffer.from('freeroot-mapped'));
