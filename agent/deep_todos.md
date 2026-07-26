@@ -5,7 +5,7 @@
 - [x] 實作 SSH server 核心功能。
 - [x] 補齊安全設定與部署文件。
 - [x] 執行驗證：`npm run check`、`npx -y node@20 scripts/check-syntax.js && npx -y node@20 --test` 均通過。
-- [x] 補互動 shell 與 PTY：新增 `node-pty` shell runner、`SSH_ENABLE_SHELL` 開關、PTY/window-change 處理、文件與整合測試。
+- [x] 補互動 shell 與 PTY：新增預編譯 PTY shell runner、`SSH_ENABLE_SHELL` 開關、PTY/window-change 處理、文件與整合測試。
 - [x] 自主疊代升級（不動既有功能）：
   - 修復 `command-runner.js` exit 競態（`settled` 旗標防重複 exit、timeout 統一回退碼 124、signal-only 回 1）。
   - 修復 `sftp-server.js` handle ID 重複 bug（改單調遞增計數器 + uint32 環繞保護，杜絕 fd 洩漏與 entry 覆蓋）。
@@ -75,3 +75,54 @@
 - [x] Docker `.env.example` 範本缺失修復（2026-06-28）：
   - `start.js` 啟動時會從 `.env.example` 複製 `.env`，Dockerfile runtime 補 `COPY .env.example ./`。
   - README troubleshooting 新增 `[start] Missing template file: .env.example`：通常代表 image 太舊或缺範本，需重新 pull/build 最新 image。
+- [x] FeatherPanel 互動 shell 安裝修復（2026-07-07）：
+  - 使用者一定要保留互動 shell，但 FeatherPanel 低磁碟容器在 `node-pty` node-gyp rebuild 解壓 Node headers 時出現 `ENOSPC`。
+  - 將 `node-pty` 換成 `@homebridge/node-pty-prebuilt-multiarch`，保留真 PTY 與 window resize 能力，優先使用 Linux 預編譯 binary。
+  - `src/shell-runner.js` 改載入新套件，README 補 FeatherPanel/低磁碟容器注意事項。
+- [x] FeatherPanel host key fallback 修復（2026-07-07）：
+  - 使用者回報 `node start.js` 產生 host key 時，`ssh-keygen` 因容器 uid 999 沒有 `/etc/passwd` 記錄而輸出 `No user exists for uid 999` 並 exit 255。
+  - `start.js` 改為捕捉 `ssh-keygen` stderr/status，失敗時 fallback 用 Node.js crypto 產生 RSA host key，不再讓啟動流程在 host key 產生階段直接崩潰。
+  - `scripts/generate-host-key.js` 同步支援 fallback；README / CHANGELOG / memory 已補紀錄。
+- [x] 互動 shell Bash 相容性修復（2026-07-07）：
+  - 使用者回報 `bash <(curl -sL kejilion.sh) tw` 不支援、`curl -sL ... | bash` 互動輸入異常、方向上鍵不能使用上一條指令。
+  - `src/shell-runner.js` 未指定 `SSH_SHELL_PATH` 時優先選 Bash/Zsh，避免落到 `/bin/sh`/dash；保留 `SSH_SHELL_PATH` 手動覆寫能力。
+  - 新增 `test/shell-runner.test.js` 覆蓋 POSIX 預設 shell 選擇順序。
+- [x] 容器 root shell HOME 修復（2026-07-25）：
+  - 定位 `kejilion.sh` 寫入 `/home/container` 的原因是 shell 繼承錯誤 `HOME`，`curl (23)` 是下游腳本提早失敗的連鎖訊息。
+  - 以 Node.js 程序實際 UID / OS user info 建立 shell 身分環境，不再把虛擬 SSH username 當作 OS 身分。
+  - 有效 UID 0 時設定 `USER=root`、`LOGNAME=root`、`HOME=/root`，並保留未映射容器 UID 的 fallback。
+  - 補單元測試涵蓋 root、一般 OS 使用者與 uid 未映射情境。
+- [x] SFTP 跟隨同 connection shell cwd（2026-07-25）：
+  - 新增預設 true 的 `SSH_SFTP_FOLLOW_SHELL_CWD`；未開 shell 時以 `SSH_SHELL_CWD` 為 SFTP 起點。
+  - 將活動 shell 狀態提升到 SSH connection scope，Linux 以 `/proc` 取得 shell/前景子程序 cwd。
+  - 跟隨模式移除 `SSH_SFTP_ROOT` 路徑沙箱並允許 `/root` 等絕對路徑；設為 false 時保留原沙箱模式。
+  - 新增 resolver、Linux proc cwd 與同 connection shell/SFTP 整合測試。
+- [x] Mytai20100/freeroot PRoot 路徑映射（2026-07-25）：
+  - 研究 FreeRoot `noninteractive.sh` 與 `proot.yml`，確認 rootfs 是腳本執行目錄、guest cwd 是 `/root`，並包含 host bind 清單。
+  - 自動從前景程序 `PROOT_CONFIG` 偵測 FreeRoot，不要求手動設定 rootfs。
+  - 實作 YAML 子集解析與 guest/host 雙向路徑、bindings 最長前綴映射。
+  - 補 FreeRoot config、`/root`、bind、`..` 正規化與 Linux 同 connection 整合測試。
+  - 加固 `PROOT_CONFIG` 讀取：僅接受一般檔案且上限 64 KiB，並補超限拒絕測試。
+- [x] 無 KVM QEMU TCG VM 整合（2026-07-25）：
+  - `.env` 控制啟用、RAM、CPU 一位小數、qcow2 容量、最小宿主剩餘空間與 VM SSH/SFTP 2223。
+  - 自動下載 Debian 12 genericcloud 並核對官方 SHA512SUMS，以 NoCloud HTTP 自動建立 VM SSH 登入。
+  - provisioning 完成需同時滿足 metadata 已取走及 VM SSH banner ready；fingerprint marker 避免後續啟動重複暴露密碼。
+  - Node.js 收到 Ctrl+C/SIGTERM 時以 QMP powerdown VM，逾時才升級 SIGTERM/SIGKILL。
+  - Docker runtime 內建 qemu-system-x86/qemu-utils；VM runtime data 存入不提交的 `vm/`。
+- [x] FeatherPanel rootless QEMU runtime bootstrap（2026-07-25）：
+  - 修復原始碼部署 `spawn qemu-system-x86_64 ENOENT`，系統 QEMU 缺失時預設啟動私有 APT runtime 安裝。
+  - APT lists/cache/archives 全部放在使用者可寫 staging，不需要 sudo、不修改 dpkg 狀態；套件仍由既有 repository 簽章與 hash 驗證。
+  - 解壓後驗證 qemu-system、qemu-img、SeaBIOS 與 version，再原子 rename 到 `vm/runtime`；啟動時注入本地 library/firmware 路徑。
+  - 補 system runtime、explicit binary、rootless install、LD_LIBRARY_PATH 與 config 測試。
+- [x] QEMU TCG 開機卡住診斷與 lifecycle 修復（2026-07-25）：
+  - 確認實機已走過 runtime、image checksum、disk resize，卡點位於 QEMU guest startup / NoCloud metadata 階段。
+  - 新增 metadata/SSH 階段日誌與 30 秒 heartbeat；metadata request 記錄檔名但不洩漏隨機 token。
+  - 移除只監控 500ms 的 early-exit 盲區，整個 startup 持續 race QEMU exit，錯誤附最近 console。
+  - SSH probe、retry delay 與 metadata timeout 可取消，補延遲退出、console 診斷與 metadata request 測試。
+- [x] VM root 密碼登入與 provisioning readiness 修復（2026-07-26）：
+  - 密碼模式寫入 `00-s12ryt-cloud-init.conf` 並重啟 OpenSSH；只有 root 密碼模式開啟 `PermitRootLogin yes`，key-only 模式維持密碼登入關閉。
+  - 新增具隨機 token 的 cloud-init `phone_home` completion endpoint，依序等待 metadata、final completion、SSH banner 後才寫 marker。
+  - provisioning schema 納入 fingerprint，讓已執行舊 user-data 的 qcow2 自動重新套用修正。
+  - completion response 完成 flush 後才提交狀態，斷線時保留 cloud-init retry 能力。
+  - 補 root password、key-only、completion endpoint 與 marker 順序回歸測試。
+  - 驗證：36 個 JS 檔 LSP 0 diagnostics；`npm run check` 57 pass / 5 skip / 0 fail；`npm audit --omit=dev` 0 vulnerabilities；`git diff --check` 通過。

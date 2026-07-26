@@ -3,8 +3,8 @@
 - 專案目標：建立可部署到生產環境的 Node.js 20 SSH server。
 - 安全策略：支援命令白名單；目前依使用者需求改為互動 shell 預設開啟，僅應給可信使用者；SFTP 路徑需限制在指定根目錄內。
 - 認證策略：支援密碼雜湊與 SSH authorized keys 公鑰認證。
-- 目前狀態：已完成 `ssh2` server、bcrypt 密碼認證、公鑰認證、白名單 exec、預設啟用互動 shell + `node-pty` 真 PTY、SFTP 根目錄限制、systemd 範本與整合測試。
-- 驗證紀錄：Windows 環境 `npm run check` 通過 9 個測試、跳過 1 個 Windows `node-pty` 真 PTY 整合測試；Linux/macOS 仍會執行真 PTY shell 測試。
+- 目前狀態：已完成 `ssh2` server、bcrypt 密碼認證、公鑰認證、白名單 exec、預設啟用互動 shell + `@homebridge/node-pty-prebuilt-multiarch` 真 PTY、預設跟隨同 connection shell cwd 的 SFTP、可選 SFTP 根目錄沙箱、systemd 範本與整合測試。
+- 驗證紀錄：Windows 環境 `npm run check` 通過 9 個測試、跳過 1 個 Windows 真 PTY 整合測試；Linux/macOS 仍會執行真 PTY shell 測試。
 - 自主疊代升級紀錄（不動功能，只修 bug/加固/優化）：
   - command-runner：exit 競態用 `settled` 旗標防護，timeout 統一回退碼 124（對齊 GNU timeout），signal-only 回 1。
   - sftp-server：handle ID 由 `handles.size+1` 改為單調遞增計數器（`nextHandleId`），修掉刪除後重用 ID 造成的 entry 覆蓋與 fd 洩漏。
@@ -65,3 +65,54 @@
   - 使用者回報容器啟動 `[start] Missing template file: .env.example`。
   - `start.js` 會用 `.env.example` 補 `.env`，Dockerfile runtime 現已複製 `.env.example` 到 `/app`。
   - README troubleshooting 補充此錯誤代表 image 太舊或缺範本，需重新 pull/build 最新 image。
+- FeatherPanel 互動 shell 安裝修復（2026-07-07）：
+  - 使用者回報 FeatherPanel 啟動時自動 `npm install`，`node-pty` 在 node-gyp 解壓 Node headers 時因 `ENOSPC` 失敗，但使用者仍需要互動 shell。
+  - 將 PTY 依賴從 `node-pty` 改為 `@homebridge/node-pty-prebuilt-multiarch`，保留真 PTY 互動 shell，同時優先使用 Linux 預編譯 binary，降低低磁碟容器內現場編譯機率。
+  - `src/shell-runner.js` 已改 require 新套件；README 已補 FeatherPanel/低磁碟容器說明。
+- FeatherPanel host key 啟動修復（2026-07-07）：
+  - 使用者回報 FeatherPanel 以 uid 999 啟動時，`start.js` 自動呼叫 `ssh-keygen` 產生 host key 失敗：`No user exists for uid 999`，造成啟動前 exit 1。
+  - `start.js` 與 `scripts/generate-host-key.js` 已改為先嘗試 `ssh-keygen` 產生 ed25519 host key；若指令失敗，fallback 用 Node.js `crypto.generateKeyPairSync()` 產生 3072-bit RSA PKCS#1 PEM host key，`ssh2.Server` 可接受此格式。
+  - README troubleshooting 已補 `No user exists for uid ...` 說明；部署仍需持久保存 `keys/`，避免每次重啟都換 host key。
+- 互動 shell 預設 shell 修復（2026-07-07）：
+  - 使用者回報 `bash <(curl -sL kejilion.sh) tw` 不支援、`curl -sL ... | bash` 腳本輸入異常、方向上鍵無法叫回上一條指令。
+  - 判定核心原因是 POSIX 預設 shell 可能落到 `/bin/sh`/dash，缺少 process substitution 與 readline/history；pipe 到 bash 也會讓腳本 stdin 變成腳本內容而非互動 TTY。
+  - `src/shell-runner.js` 未指定 `SSH_SHELL_PATH` 時改為優先選 `/bin/bash`、`/usr/bin/bash`、`/bin/zsh`、`/usr/bin/zsh`，最後才退回 `$SHELL`/`/bin/sh`；shell env 會把 `SHELL` 設為實際啟動 shell。
+- 容器 root shell 身分環境修復（2026-07-25）：
+  - 使用者在 FeatherPanel 容器取得 root 後執行 `bash <(curl -sL kejilion.sh)`，腳本仍操作 `/home/container/kejilion.sh`，造成 `curl: (23)`、`chmod` 與檔案不存在錯誤。
+  - 根因是 `src/shell-runner.js` 沿用 Node.js 啟動環境的 `HOME=/home/container`，且把應用層 SSH username 當成 OS 使用者；SSH username 本身不會改變程序 UID。
+  - shell env 現改由程序實際 UID 與 `os.userInfo()` 推導；有效 UID 0 固定使用 `USER=root`、`LOGNAME=root`、`HOME=/root`，未映射 uid 則安全退回既有環境。
+  - shell 內另行提權仍需 `su -` 或 `sudo -i` 才能完整切換登入環境；一般 `su` 保留舊 `HOME` 屬工具本身行為。
+- SFTP 跟隨 shell cwd（2026-07-25）：
+  - 使用者要求同一 SSH connection 的 SFTP 跟隨 shell 當前路徑、不保留根目錄沙箱、可直接讀寫 `/root`，並要求設定未填時預設開啟。
+  - 新增 `SSH_SFTP_FOLLOW_SHELL_CWD`，預設 true；Linux 透過 `/proc/<shell-pid>/stat` 找 foreground process group，再讀 `/proc/<pid>/cwd` 動態取得 shell cwd。
+  - shell controller 提供 `getCwd()`；server 在 connection scope 保存活動 shell，讓不同 session channel 的 SFTP 共享同一 connection 的 shell 狀態。
+  - 跟隨模式允許絕對 OS 路徑與 `..`；關閉設定時仍走 `SSH_SFTP_ROOT` 與 `resolveInsideRoot()`。SFTP 實際權限永遠等於 Node.js 程序 UID，shell 子程序提權不會提升 Node/SFTP 權限。
+- Mytai20100/freeroot PRoot 相容（2026-07-25）：
+  - FreeRoot `noninteractive.sh` 以執行目錄作 `ROOTFS_DIR`，產生 `${ROOTFS_DIR}/usr/local/.config/proot.yml` 並匯出 `PROOT_CONFIG`；guest `/root` 對應 `${ROOTFS_DIR}/root`。
+  - 新增 `src/proot-paths.js` 解析 FreeRoot YAML 子集與 bindings，提供 guest→host、host→guest 最長前綴轉換。
+  - `shell-runner` 從前景程序 `/proc/<pid>/environ` 自動取得 `PROOT_CONFIG`；SFTP resolver 使用該 context，無需使用者另填 rootfs。
+  - guest 相對路徑先在 guest namespace 正規化再映射，避免 `..` 錯誤逃出 rootfs；bind 路徑優先於一般 rootfs 前綴。
+  - 讀取 `PROOT_CONFIG` 前先確認為一般檔案且不超過 64 KiB，避免異常設定路徑造成不受控 I/O。
+- QEMU TCG VM 整合（2026-07-25）：
+  - 使用者要求無 KVM 情境下由專案管理 VM，`.env` 控制 RAM、CPU（支援一位小數）與磁碟，VM 以 2223 提供自己的 SSH/SFTP，並隨 Node.js / Ctrl+C 一起啟停。
+  - 新增 VM config、官方 Debian genericcloud 下載與 SHA-512 驗證、qcow2 單向擴容、NoCloud localhost metadata、QEMU TCG lifecycle、QMP ACPI powerdown 與 cgroup v2 fractional CPU best-effort 限制。
+  - NoCloud 憑證只在首次或登入設定 fingerprint 變更時提供；取走設定且 VM SSH banner 可用後才寫 provisioning marker 並關閉 metadata server，後續啟動不再提供密碼。
+  - FeatherPanel 回報 x86_64、約 48 GiB RAM/363 GiB 可用磁碟、cgroup 唯讀且沒有 QEMU；Docker image 內建 QEMU，原始碼部署需由平台提供 binary。
+  - 宿主 SSH/SFTP 保留 2222；VM OpenSSH/SFTP 使用 2223，VM filesystem 不再經過宿主 SFTP resolver。
+- FeatherPanel QEMU runtime 自動安裝（2026-07-25）：
+  - 使用者實際啟動回報 `spawn qemu-system-x86_64 ENOENT`，確認原始碼容器缺少 QEMU，而非 VM image 或資源設定錯誤。
+  - 新增 `src/vm-runtime.js`；系統 binary 不存在時，預設以使用者可寫的私有 APT state 下載經 repository 簽章驗證的 qemu-system-x86/qemu-utils/seabios 套件，使用 `dpkg-deb` 解壓到 `vm/runtime`。
+  - 安裝使用隨機 staging 目錄，完整 binary/firmware 與 version check 通過後才原子啟用；QEMU 啟動同步帶入本地 LD_LIBRARY_PATH、firmware data 與 SeaBIOS 路徑。
+  - 可用 `VM_QEMU_AUTO_INSTALL=false` 關閉，或用 `VM_QEMU_BINARY` / `VM_QEMU_IMG_BINARY` 明確指定平台提供的 runtime。
+- QEMU TCG 開機診斷修復（2026-07-25）：
+  - 使用者實機已成功完成 runtime 安裝、Debian image SHA-512 驗證與 qcow2 擴容，但日誌停在 `Starting QEMU TCG VM`，無法判斷 guest 是否仍開機、QEMU 已退出或 NoCloud 無法取得。
+  - `vm-manager` 現持續監控整個 startup，而非只監控前 500ms；QEMU 延遲退出立即 reject 並附最近 20 行 console。
+  - startup 分成 cloud-init metadata 與 SSH readiness 兩階段，每 30 秒輸出 elapsed time；metadata server 首次提供 meta-data/user-data 時各記錄一筆不含 token 的日誌。
+  - metadata timeout 與 SSH probe/retry 改為可取消，QEMU 退出或 startup 結束會清理 timer、socket、abort listener，避免錯誤後仍掛到 timeout。
+- VM root 密碼登入與 readiness 修復（2026-07-26）：
+  - 實機已證明 SSH banner 早於 cloud-init final 約 11 秒出現；banner 只能證明 sshd 已啟動，不能代表密碼與 SSH policy 已完成。
+  - 密碼模式由 cloud-init 寫入 `/etc/ssh/sshd_config.d/00-s12ryt-cloud-init.conf` 並重啟 `ssh.service`；root 密碼模式明確設定 `PermitRootLogin yes`，key-only 不開啟密碼登入。
+  - NoCloud user-data 使用具 192-bit 隨機 token 的 `phone_home` URL；localhost metadata server 只接受 completion path 的 POST，response flush 後才 resolve，支援 cloud-init retry。
+  - manager 首次 provisioning 依序等待 metadata consumed、cloud-init final completion、SSH banner，全部成功後才寫 marker；任一階段 QEMU 退出或逾時均停止 VM 並清理 server。
+  - provisioning fingerprint 加入 schema version，讓跑過舊 cloud-init instance-id 的既有磁碟自動取得新 instance-id 並重新套用修正。
+  - 本輪驗證：36 個 JS 檔 LSP 0 diagnostics；62 tests 共 57 pass / 5 Windows skip / 0 fail；production dependency audit 0 vulnerabilities；diff whitespace check 通過。
