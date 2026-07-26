@@ -8,6 +8,9 @@
 
 ### Fixed 修復
 
+- `command-runner` / `shell-runner`：SSH channel 中斷時解除 pipe/listener、清除 timer 並終止 child/PTY；命令忽略 `SIGTERM` 時會升級 `SIGKILL`，避免斷線或逾時後程序持續佔用資源。Release exec and PTY resources on disconnect and force-kill commands that ignore timeout termination.
+- `sftp-server`：channel 的 `end`/`close`/`error` 統一關閉全部 file/dir handles；目錄改為每批 50 筆串流讀取，單次 file read 降至 64 KiB，避免大型目錄與並行讀取造成記憶體尖峰。Stream directory entries and close every SFTP handle on all channel termination paths.
+- `vm-runtime` / `vm-manager` / `qmp-client`：runtime stdout/stderr 各限制最後 256 KiB，QEMU console 單行限制 64 KiB且錯誤只保留最近 20 行；完成後移除 socket、spawn、metadata 與 console listeners。Bound VM diagnostic buffers and release socket/process listeners after completion.
 - `vm-metadata` / `vm-manager`：密碼 provisioning 會寫入 OpenSSH drop-in，root 帳號明確允許密碼登入；新增 cloud-init `phone_home` completion gate，避免只看到 SSH banner 就過早寫 marker，並提升 schema fingerprint 讓舊磁碟自動重新套用修正。Fixed VM root password login and wait for cloud-init final completion before declaring readiness.
 - `vm-manager` / `vm-metadata`：QEMU 啟動期間新增 metadata/SSH 階段與 30 秒進度日誌，持續監控延遲退出，錯誤附最近 console，並可取消 metadata timer、SSH socket 與重試迴圈，修復停在 `Starting QEMU TCG VM` 無診斷及退出後仍等待 timeout。Added cancellable, stage-aware VM startup diagnostics and continuous QEMU exit monitoring.
 - `proot-paths` / `shell-runner` / `sftp-server`：自動從 Linux 前景程序的 `PROOT_CONFIG` 偵測 Mytai20100/freeroot，解析 `proot.yml` 的 rootfs/cwd/bindings，讓 SFTP guest 路徑與 FreeRoot 實體檔案雙向映射。Added automatic FreeRoot PRoot guest/host path translation.

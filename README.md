@@ -38,6 +38,7 @@
 - **互動 shell Interactive shell**：預設啟用，使用預編譯真實 PTY 支援互動程式與視窗 resize，工作目錄預設為 `s12ryt/`。Prebuilt real-PTY shell enabled by default with `s12ryt/` as the default workspace.
 - **SFTP**：預設跟隨同一 SSH connection 的 shell 工作目錄，亦可關閉跟隨模式恢復 `SSH_SFTP_ROOT` 沙箱。Follows the shell cwd on the same SSH connection by default, with an optional sandboxed mode.
 - **QEMU TCG VM**：可選擇隨 Node.js 啟動無 KVM 的 Debian VM，獨立提供 SSH/SFTP，並由 `.env` 控制 RAM、CPU 與磁碟。Optional no-KVM Debian VM with independent SSH/SFTP and env-based resource controls.
+- **資源生命週期 Resource lifecycle**：SSH channel 中斷會釋放 child process、PTY subscription、SFTP handle、socket listener 與 timer；大型目錄、命令輸出及 QEMU console 使用有界緩衝。Disconnected channels release child processes, PTY subscriptions, SFTP handles, socket listeners, and timers; large directories and process output use bounded buffers.
 - **生產部署 Production**：環境變數設定、graceful shutdown、JSON log、最大連線數限制。Env-based config, graceful shutdown, JSON logs, max-connection limiting.
 
 ## 快速開始 Quick Start
@@ -537,6 +538,9 @@ npm run check
 ```
 
 此指令會執行 Node 語法檢查與 `node --test`。Runs syntax checks plus the `node --test` suite.
+
+資源回歸測試涵蓋 exec 中斷與強制終止、PTY/SFTP channel 清理、QMP socket listener、runtime command output 上限，以及 QEMU 超長 console 行。SFTP 單次 read 上限為 64 KiB、目錄每批最多 50 筆；runtime stdout/stderr 各保留最後 256 KiB，避免診斷資料與 VM 爭用不必要的 Node.js heap。
+Resource regression tests cover interrupted exec processes, PTY/SFTP cleanup, QMP listeners, bounded runtime output, and oversized QEMU console lines.
 
 ## 貢獻 Contributing
 
