@@ -116,3 +116,7 @@
   - manager 首次 provisioning 依序等待 metadata consumed、cloud-init final completion、SSH banner，全部成功後才寫 marker；任一階段 QEMU 退出或逾時均停止 VM 並清理 server。
   - provisioning fingerprint 加入 schema version，讓跑過舊 cloud-init instance-id 的既有磁碟自動取得新 instance-id 並重新套用修正。
   - 本輪驗證：36 個 JS 檔 LSP 0 diagnostics；62 tests 共 57 pass / 5 Windows skip / 0 fail；production dependency audit 0 vulnerabilities；diff whitespace check 通過。
+- GitHub 推送紀錄（2026-07-26）：
+  - README 與本輪完整功能、測試及維護文件已整理為 16 個 semantic atomic commits 並推送至 `origin/main`。
+  - 首次推送範圍為 `07f9b00..1c3be22`，本機與遠端 commit 均確認為 `1c3be227ba6d753fb23a81586b52862bb123ac70`。
+  - 按使用者要求保留且未提交 `agent/t.md`、`s12ryt-nodejs-ssh.zip`。

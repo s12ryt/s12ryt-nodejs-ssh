@@ -126,3 +126,7 @@
   - completion response 完成 flush 後才提交狀態，斷線時保留 cloud-init retry 能力。
   - 補 root password、key-only、completion endpoint 與 marker 順序回歸測試。
   - 驗證：36 個 JS 檔 LSP 0 diagnostics；`npm run check` 57 pass / 5 skip / 0 fail；`npm audit --omit=dev` 0 vulnerabilities；`git diff --check` 通過。
+- [x] README 更新與 GitHub 推送（2026-07-26）：
+  - README 已涵蓋 shell/SFTP、FreeRoot、QEMU TCG、rootless runtime、cloud-init completion 與 VM root 密碼修復。
+  - 以 16 個原子提交整理程式、測試、部署與文件變更，排除 `agent/t.md` 與 `s12ryt-nodejs-ssh.zip`。
+  - 推送至 `origin/main` 成功；遠端 commit 為 `1c3be227ba6d753fb23a81586b52862bb123ac70`。
