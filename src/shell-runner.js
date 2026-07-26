@@ -161,9 +161,10 @@ function loadPty() {
   }
 }
 
-export function createShellRunner(config, logger) {
+export function createShellRunner(config, logger, dependencies = {}) {
   const shellPath = config.shellPath || defaultShellPath();
   const shellCwd = config.shellCwd || process.cwd();
+  const getPty = dependencies.loadPty || loadPty;
 
   function stderrFor(stream) {
     return stream.stderr || stream;
@@ -177,10 +178,11 @@ export function createShellRunner(config, logger) {
       const term = ptyInfo.term || 'xterm-256color';
 
       let exited = false;
+      let closed = false;
       let terminal;
 
       try {
-        const pty = loadPty();
+        const pty = getPty();
         terminal = pty.spawn(shellPath, [], {
           name: term,
           cols,
@@ -214,13 +216,46 @@ export function createShellRunner(config, logger) {
         rows
       });
 
-      terminal.onData((data) => {
+      let dataSubscription;
+      let exitSubscription;
+      let listenersReleased = false;
+
+      function releaseListeners() {
+        if (listenersReleased) {
+          return;
+        }
+        listenersReleased = true;
+        dataSubscription?.dispose();
+        exitSubscription?.dispose();
+        stream.off('data', onStreamData);
+        stream.off('close', onStreamClose);
+        stream.off('error', onStreamClose);
+      }
+
+      function onStreamData(data) {
+        if (!exited && !closed) {
+          terminal.write(data.toString());
+        }
+      }
+
+      function onStreamClose() {
+        if (closed) {
+          return;
+        }
+        closed = true;
         if (!exited) {
+          terminal.kill();
+        }
+        releaseListeners();
+      }
+
+      dataSubscription = terminal.onData((data) => {
+        if (!exited && !closed) {
           stream.write(data);
         }
       });
 
-      terminal.onExit(({ exitCode, signal }) => {
+      exitSubscription = terminal.onExit(({ exitCode, signal }) => {
         if (exited) {
           return;
         }
@@ -228,19 +263,12 @@ export function createShellRunner(config, logger) {
         logger.info('Interactive shell exited', { username: context.username, exitCode, signal });
         stream.exit(exitCode ?? 0);
         stream.end();
+        releaseListeners();
       });
 
-      stream.on('data', (data) => {
-        if (!exited) {
-          terminal.write(data.toString());
-        }
-      });
-
-      stream.on('close', () => {
-        if (!exited) {
-          terminal.kill();
-        }
-      });
+      stream.on('data', onStreamData);
+      stream.once('close', onStreamClose);
+      stream.once('error', onStreamClose);
 
       return {
         getCwd() {
@@ -261,9 +289,7 @@ export function createShellRunner(config, logger) {
           terminal.resize(nextCols, nextRows);
         },
         close() {
-          if (!exited) {
-            terminal.kill();
-          }
+          onStreamClose();
         }
       };
     }

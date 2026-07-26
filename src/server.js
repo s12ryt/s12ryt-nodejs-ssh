@@ -28,6 +28,13 @@ export function createSshServer(config, logger) {
       activeClients += 1;
       const context = { username: undefined, ip: info.ip };
       const activeShells = new Set();
+      function latestActiveShell() {
+        let latest;
+        for (const shell of activeShells) {
+          latest = shell;
+        }
+        return latest;
+      }
       logger.info('Client connected', { ip: info.ip, activeClients });
 
       client.on('authentication', (ctx) => {
@@ -118,12 +125,10 @@ export function createSshServer(config, logger) {
               followShellCwd: config.sftpFollowShellCwd,
               defaultCwd: config.shellCwd,
               getShellCwd() {
-                const shells = Array.from(activeShells);
-                return shells.at(-1)?.getCwd?.();
+                return latestActiveShell()?.getCwd?.();
               },
               getShellPathContext() {
-                const shells = Array.from(activeShells);
-                return shells.at(-1)?.getPathContext?.();
+                return latestActiveShell()?.getPathContext?.();
               }
             });
           });
@@ -135,6 +140,10 @@ export function createSshServer(config, logger) {
       });
 
       client.on('close', () => {
+        for (const shell of activeShells) {
+          shell.close();
+        }
+        activeShells.clear();
         activeClients = Math.max(0, activeClients - 1);
         logger.info('Client disconnected', { username: context.username, ip: info.ip, activeClients });
       });

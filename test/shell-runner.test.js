@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { createShellEnv, readLinuxProcessContext, readLinuxProcessCwd, selectDefaultPosixShell } from '../src/shell-runner.js';
+import { EventEmitter } from 'node:events';
+import { createShellEnv, createShellRunner, readLinuxProcessContext, readLinuxProcessCwd, selectDefaultPosixShell } from '../src/shell-runner.js';
 
 test('selectDefaultPosixShell prefers bash over sh for interactive compatibility', () => {
   const executable = new Set(['/bin/bash', '/bin/sh']);
@@ -155,4 +156,45 @@ test('readLinuxProcessContext rejects an oversized PRoot config before reading i
 
   assert.equal(context.proot, undefined);
   assert.equal(configRead, false);
+});
+
+test('createShellRunner disposes PTY subscriptions and stream listeners on close', () => {
+  const stream = new EventEmitter();
+  stream.stderr = stream;
+  stream.write = () => {};
+  stream.exit = () => {};
+  stream.end = () => {};
+  let killed = 0;
+  let disposed = 0;
+  const terminal = {
+    pid: 123,
+    onData() {
+      return { dispose() { disposed += 1; } };
+    },
+    onExit() {
+      return { dispose() { disposed += 1; } };
+    },
+    write() {},
+    resize() {},
+    kill() {
+      killed += 1;
+    }
+  };
+  const runner = createShellRunner(
+    { shellPath: '/fake/shell', shellCwd: process.cwd() },
+    { info() {}, error() {} },
+    { loadPty: () => ({ spawn: () => terminal }) }
+  );
+
+  runner.start(stream, {}, { username: 'deploy' });
+  assert.equal(stream.listenerCount('data'), 1);
+  assert.equal(stream.listenerCount('close'), 1);
+  assert.equal(stream.listenerCount('error'), 1);
+
+  stream.emit('close');
+  assert.equal(killed, 1);
+  assert.equal(disposed, 2);
+  assert.equal(stream.listenerCount('data'), 0);
+  assert.equal(stream.listenerCount('close'), 0);
+  assert.equal(stream.listenerCount('error'), 0);
 });
