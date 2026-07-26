@@ -119,7 +119,10 @@ function connectShellAndSftp({ port, shellCommand, marker, runSftp }) {
           }
           stream.on('data', (chunk) => {
             output += chunk.toString();
-            if (startedSftp || !output.includes(marker)) {
+            const markerReceived = output
+              .split(/\r?\n/)
+              .some((line) => line.trim() === marker);
+            if (startedSftp || !markerReceived) {
               return;
             }
             startedSftp = true;
