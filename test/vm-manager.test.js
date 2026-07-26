@@ -90,6 +90,7 @@ test('createVmManager starts and gracefully stops the QEMU child', async () => {
   });
 
   await manager.start();
+  assert.equal(child.listenerCount('error'), 0);
   await manager.stop();
 
   assert.equal(qmpCommand, 'system_powerdown');
@@ -216,4 +217,68 @@ test('createVmManager fails immediately when QEMU exits after the initial spawn 
 
   await assert.rejects(() => manager.start(), /QEMU exited during startup.*fatal boot error/);
   assert.equal(metadataClosed, true);
+});
+
+test('createVmManager bounds QEMU console lines retained during startup failure', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-manager-output-bound-'));
+  const child = new EventEmitter();
+  child.pid = 8765;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => {};
+  const loggedOutputLengths = [];
+  const manager = createVmManager({
+    enabled: true,
+    qemuBinary: 'qemu',
+    hostname: 'vm',
+    cpuLimit: 1,
+    ramMb: 512,
+    diskGb: 4,
+    imagePath: path.join(directory, 'vm.qcow2'),
+    sshUsername: 'root',
+    sshPassword: 'StrongPassword123!',
+    sshAuthorizedKey: '',
+    sshHost: '127.0.0.1',
+    sshHostPort: 2223,
+    shutdownTimeoutMs: 1000,
+    metadataTimeoutMs: 60000
+  }, {
+    debug(message, details) { loggedOutputLengths.push(details?.output?.length || 0); },
+    info() {},
+    warn(message, details) { loggedOutputLengths.push(details?.output?.length || 0); },
+    error() {}
+  }, {
+    qmpPath: '/tmp/test-vm-output-bound.qmp',
+    ensureVmImage: async () => {},
+    startMetadataServer: async () => ({
+      seedUrl: 'http://10.0.2.2:1234/token/',
+      consumed: new Promise(() => {}),
+      async close() {}
+    }),
+    spawnProcess: () => {
+      queueMicrotask(() => {
+        child.emit('spawn');
+        child.stderr.write(`${'x'.repeat(1024 * 1024)}\n`);
+        setTimeout(() => {
+          child.exitCode = 1;
+          child.emit('exit', 1, null);
+        }, 20);
+      });
+      return child;
+    },
+    applyCpuLimit: () => ({ enforced: true, cleanup() {} })
+  });
+
+  let startupError;
+  try {
+    await manager.start();
+  } catch (error) {
+    startupError = error;
+  }
+
+  assert.ok(startupError);
+  assert.ok(startupError.message.length < 100000);
+  assert.ok(Math.max(...loggedOutputLengths) <= 64 * 1024);
 });

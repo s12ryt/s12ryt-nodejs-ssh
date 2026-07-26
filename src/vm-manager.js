@@ -2,12 +2,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import readline from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
 import { ensureVmImage } from './vm-image.js';
 import { cloudInitFingerprint, startMetadataServer } from './vm-metadata.js';
 import { applyCpuLimit } from './vm-cpu-limit.js';
 import { sendQmpCommand } from './qmp-client.js';
 import { qemuCommandEnvironment } from './vm-runtime.js';
+
+const MAX_QEMU_LOG_LINE_CHARS = 64 * 1024;
+const MAX_RECENT_QEMU_LINE_CHARS = 4096;
+const MAX_RECENT_QEMU_LINES = 20;
 
 function waitForExit(child, timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) {
@@ -38,6 +42,8 @@ function probeSsh(host, port, signal) {
       settled = true;
       clearTimeout(timeout);
       signal?.removeEventListener('abort', onAbort);
+      socket.off('data', onData);
+      socket.off('error', finish);
       socket.destroy();
       if (error) {
         reject(error);
@@ -54,13 +60,14 @@ function probeSsh(host, port, signal) {
     }
     signal?.addEventListener('abort', onAbort, { once: true });
     socket.setEncoding('utf8');
-    socket.once('data', (data) => {
+    function onData(data) {
       if (data.startsWith('SSH-')) {
         finish();
       } else {
         finish(new Error('VM port did not return an SSH banner'));
       }
-    });
+    }
+    socket.once('data', onData);
     socket.once('error', finish);
   });
 }
@@ -119,18 +126,91 @@ function recentQemuOutput(lines) {
 
 function logLines(stream, logger, level, message, recentLines) {
   if (!stream) {
-    return;
+    return () => {};
   }
-  const lines = readline.createInterface({ input: stream });
-  lines.on('line', (line) => {
-    if (line.trim()) {
-      recentLines.push(line.trim());
-      if (recentLines.length > 100) {
-        recentLines.shift();
-      }
-      logger[level](message, { output: line });
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let discardingLongLine = false;
+  let detached = false;
+
+  function emitLine(line, truncated = false) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
     }
-  });
+    const truncationMarker = '...[truncated]';
+    const output = truncated
+      ? `${trimmed.slice(0, MAX_QEMU_LOG_LINE_CHARS - truncationMarker.length)}${truncationMarker}`
+      : trimmed;
+    recentLines.push(output.slice(0, MAX_RECENT_QEMU_LINE_CHARS));
+    if (recentLines.length > MAX_RECENT_QEMU_LINES) {
+      recentLines.shift();
+    }
+    logger[level](message, { output });
+  }
+
+  function consume(text) {
+    while (text.length > 0) {
+      const newline = text.indexOf('\n');
+      if (newline === -1) {
+        if (!discardingLongLine) {
+          const available = MAX_QEMU_LOG_LINE_CHARS - pending.length;
+          if (text.length > available) {
+            pending += text.slice(0, available);
+            emitLine(pending, true);
+            pending = '';
+            discardingLongLine = true;
+          } else {
+            pending += text;
+          }
+        }
+        return;
+      }
+      const segment = text.slice(0, newline).replace(/\r$/, '');
+      text = text.slice(newline + 1);
+      if (discardingLongLine) {
+        discardingLongLine = false;
+        pending = '';
+        continue;
+      }
+      const available = MAX_QEMU_LOG_LINE_CHARS - pending.length;
+      if (segment.length > available) {
+        pending += segment.slice(0, available);
+        emitLine(pending, true);
+      } else {
+        emitLine(`${pending}${segment}`);
+      }
+      pending = '';
+    }
+  }
+
+  function onData(chunk) {
+    consume(decoder.write(chunk));
+  }
+
+  function onEnd() {
+    consume(decoder.end());
+    if (!discardingLongLine) {
+      emitLine(pending);
+    }
+    detach();
+  }
+
+  function detach() {
+    if (detached) {
+      return;
+    }
+    detached = true;
+    pending = '';
+    stream.off('data', onData);
+    stream.off('end', onEnd);
+    stream.off('close', detach);
+  }
+
+  stream.on('data', onData);
+  stream.once('end', onEnd);
+  stream.once('close', detach);
+  return detach;
 }
 
 function monitorStartupExit(child, recentLines) {
@@ -258,19 +338,31 @@ export function createVmManager(config, logger, dependencies = {}) {
         env: qemuCommandEnvironment(config)
       });
       await new Promise((resolve, reject) => {
-        child.once('spawn', resolve);
-        child.once('error', reject);
+        function onSpawn() {
+          child.off('error', onError);
+          resolve();
+        }
+        function onError(error) {
+          child.off('spawn', onSpawn);
+          reject(error);
+        }
+        child.once('spawn', onSpawn);
+        child.once('error', onError);
       }).catch(async (error) => {
         child = undefined;
         await cleanup();
         throw new Error(`Failed to start QEMU: ${error.message}`);
       });
       const recentOutput = [];
-      logLines(child.stdout, logger, 'debug', 'QEMU output', recentOutput);
-      logLines(child.stderr, logger, 'warn', 'QEMU error output', recentOutput);
+      const consoleCleanups = [
+        logLines(child.stdout, logger, 'debug', 'QEMU output', recentOutput),
+        logLines(child.stderr, logger, 'warn', 'QEMU error output', recentOutput)
+      ];
+      const stopConsoleLogging = () => consoleCleanups.forEach((close) => close());
       const startupExit = monitorStartupExit(child, recentOutput);
       cpuController = limitCpu(child.pid, config.cpuLimit, logger);
       child.once('exit', async (code, signal) => {
+        stopConsoleLogging();
         const expected = stopping;
         child = undefined;
         await cleanup();
@@ -344,6 +436,7 @@ export function createVmManager(config, logger, dependencies = {}) {
           runningChild.kill('SIGTERM');
         }
         await waitForExit(runningChild, 5000);
+        stopConsoleLogging();
         await cleanup();
         if (!error.message.includes('Recent QEMU output:')) {
           error.message += recentQemuOutput(recentOutput);
