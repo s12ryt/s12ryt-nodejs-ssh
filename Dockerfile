@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS dependencies
+FROM node:24-bookworm-slim AS dependencies
 
 WORKDIR /app
 
@@ -9,7 +9,7 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -26,7 +26,7 @@ COPY src ./src
 COPY scripts ./scripts
 COPY config/*.example.json ./config/
 
-RUN mkdir -p /app/config /app/keys /app/s12ryt \
+RUN mkdir -p /app/config /app/keys \
   && chown -R node:node /app
 
 USER node

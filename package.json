@@ -27,7 +27,7 @@
     "security"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "start": "node start.js",
@@ -42,6 +42,6 @@
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",
-    "ssh2": "^1.16.0"
+    "ssh2": "1.16.0"
   }
 }

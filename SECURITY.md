@@ -38,3 +38,11 @@ This project is a network-facing SSH server, so security matters. **Please do no
 - 互動 shell 權限提升。Interactive shell privilege escalation.
 - 阻斷服務 / 資源耗盡。Denial of service / resource exhaustion.
 - 敏感資訊（密碼 hash、host key）洩漏。Leakage of secrets such as password hashes or host keys.
+
+## 硬化基線 Hardening Baseline
+
+- Runtime 必須是 Node.js 24 LTS 或更新版本；Node 20 已於 2026-04-30 EOL，不再接收安全修補。Node.js 24 LTS or newer is required.
+- `ssh2` 釘選在 `1.16.0`；升級前請先確認 CVE-2025-70034 已有上游修補。`ssh2` is pinned to 1.16.0 pending a fix for CVE-2025-70034.
+- 密碼上限為 UTF-8 72 bytes，避免 bcrypt 靜默截斷。Passwords are capped at 72 UTF-8 bytes.
+- 連線限額由 `SSH_MAX_CLIENTS`、`SSH_MAX_CLIENTS_PER_IP`、`SSH_MAX_AUTH_FAILURES`、`SSH_MAX_SESSIONS_PER_CLIENT` 控制。Connection limits are configurable.
+- CI 以 `npm audit --audit-level=high` 與 Trivy 映像掃描作為發布前 gate。CI gates on npm audit and Trivy.

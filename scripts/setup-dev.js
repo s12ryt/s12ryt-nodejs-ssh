@@ -1,19 +1,21 @@
+// scripts/setup-dev.js
+// 1. 載入 .env 並建立開發用目錄（L12-20）
+// 2. copyIfMissing：補齊 .env 與 commands.json（L22-32）
+// 3. 以 src/dev-credentials.js 的政策產生開發用 users.json（L34-41）
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 
+import { resolveDefaultUsername, resolveDefaultPassword } from '../src/dev-credentials.js';
+
 const root = process.cwd();
 dotenv.config({ path: path.join(root, '.env') });
 
-const defaultUsername = (process.env.SSH_DEFAULT_USERNAME || 'deploy').trim();
-const defaultPassword = process.env.SSH_DEFAULT_PASSWORD || 'ChangeMe123!';
+const defaultUsername = resolveDefaultUsername();
+const defaultPassword = resolveDefaultPassword();
 
-if (!defaultUsername) {
-  throw new Error('SSH_DEFAULT_USERNAME must not be empty');
-}
-
-if (defaultPassword.length < 8) {
-  throw new Error('SSH_DEFAULT_PASSWORD must be at least 8 characters');
+for (const directory of ['config', 'keys', 's12ryt']) {
+  fs.mkdirSync(path.join(root, directory), { recursive: true });
 }
 
 function copyIfMissing(source, target) {
@@ -22,10 +24,6 @@ function copyIfMissing(source, target) {
     console.log(`Created ${path.relative(root, target)}`);
   }
 }
-
-fs.mkdirSync(path.join(root, 'config'), { recursive: true });
-fs.mkdirSync(path.join(root, 'keys'), { recursive: true });
-fs.mkdirSync(path.join(root, 's12ryt'), { recursive: true });
 
 copyIfMissing(path.join(root, '.env.example'), path.join(root, '.env'));
 copyIfMissing(path.join(root, 'config', 'commands.example.json'), path.join(root, 'config', 'commands.json'));

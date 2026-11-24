@@ -5,6 +5,18 @@ import ssh2 from 'ssh2';
 
 const { utils } = ssh2;
 
+// bcrypt 只取密碼前 72 bytes，超長密碼會被靜默截斷（CVE-2025-22228 類語意繞過），
+// 因此在 hash 與驗證兩側都以 UTF-8 byte 長度明確拒絕。
+export const BCRYPT_COST = 12;
+export const MAX_PASSWORD_BYTES = 72;
+export const MIN_PASSWORD_LENGTH = 8;
+
+const PLACEHOLDER_PASSWORD = 'invalid-placeholder-password';
+
+export function passwordByteLength(password) {
+  return Buffer.byteLength(String(password), 'utf8');
+}
+
 function readUsers(usersFile) {
   const users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
   if (!Array.isArray(users)) {
@@ -17,7 +29,7 @@ function isBcryptHash(value) {
   return typeof value === 'string' && /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
 
-function normalizeUsers(usersFile) {
+export function normalizeUsers(usersFile) {
   let changed = false;
   const users = readUsers(usersFile).map((user) => {
     const normalized = { ...user };
@@ -42,10 +54,13 @@ function normalizeUsers(usersFile) {
     }
 
     if (!isBcryptHash(normalized.password)) {
-      if (normalized.password.length < 8) {
-        throw new Error(`Password for user ${normalized.username || '<unknown>'} must be at least 8 characters`);
+      if (normalized.password.length < MIN_PASSWORD_LENGTH) {
+        throw new Error(`Password for user ${normalized.username || '<unknown>'} must be at least ${MIN_PASSWORD_LENGTH} characters`);
       }
-      normalized.password = bcrypt.hashSync(normalized.password, 12);
+      if (passwordByteLength(normalized.password) > MAX_PASSWORD_BYTES) {
+        throw new Error(`Password for user ${normalized.username || '<unknown>'} must not exceed ${MAX_PASSWORD_BYTES} bytes`);
+      }
+      normalized.password = bcrypt.hashSync(normalized.password, BCRYPT_COST);
       changed = true;
     }
 
@@ -100,7 +115,7 @@ export function createAuthenticator(usersFile) {
 
   // Dummy hash so that authentication for unknown usernames still spends time on
   // bcrypt, preventing username enumeration via response timing differences.
-  const dummyPasswordHash = bcrypt.hashSync('invalid-placeholder-password', 10);
+  const dummyPasswordHash = bcrypt.hashSync(PLACEHOLDER_PASSWORD, BCRYPT_COST);
 
   function findUser(username) {
     return users.find((user) => safeStringEquals(user.username, username));
@@ -110,8 +125,9 @@ export function createAuthenticator(usersFile) {
     verifyPassword(username, password) {
       const user = findUser(username);
       const hash = user?.storedPasswordHash || dummyPasswordHash;
-      const matches = bcrypt.compareSync(password, hash);
-      return Boolean(user?.storedPasswordHash) && matches;
+      const oversized = typeof password !== 'string' || passwordByteLength(password) > MAX_PASSWORD_BYTES;
+      const matches = bcrypt.compareSync(oversized ? PLACEHOLDER_PASSWORD : password, hash);
+      return !oversized && Boolean(user?.storedPasswordHash) && matches;
     },
 
     verifyPublicKey(username, key, blob, signature, hashAlgo) {
