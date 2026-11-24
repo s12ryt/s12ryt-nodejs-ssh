@@ -18,7 +18,6 @@
 - [快速開始 Quick Start](#快速開始-quick-start)
 - [正式環境設定 Production Setup](#正式環境設定-production-setup)
 - [互動式 Shell Interactive Shell](#互動式-shell-interactive-shell)
-- [QEMU TCG 虛擬機](#qemu-tcg-虛擬機)
 - [命令白名單 Command Whitelist](#命令白名單-command-whitelist)
 - [環境變數 Environment Variables](#環境變數-environment-variables)
 - [Container Image](#container-image)
@@ -37,8 +36,7 @@
 - **命令執行 Command execution**：只允許 `config/commands.json` 白名單內的命令，以 `spawn(shell: false)` 執行避免注入。Only whitelisted commands run, spawned without a shell to prevent injection.
 - **互動 shell Interactive shell**：預設啟用，使用預編譯真實 PTY 支援互動程式與視窗 resize，工作目錄預設為 `s12ryt/`。Prebuilt real-PTY shell enabled by default with `s12ryt/` as the default workspace.
 - **SFTP**：預設跟隨同一 SSH connection 的 shell 工作目錄，亦可關閉跟隨模式恢復 `SSH_SFTP_ROOT` 沙箱。Follows the shell cwd on the same SSH connection by default, with an optional sandboxed mode.
-- **QEMU TCG VM**：可選擇隨 Node.js 啟動無 KVM 的 Debian VM，獨立提供 SSH/SFTP，並由 `.env` 控制 RAM、CPU 與磁碟。Optional no-KVM Debian VM with independent SSH/SFTP and env-based resource controls.
-- **資源生命週期 Resource lifecycle**：SSH channel 中斷會釋放 child process、PTY subscription、SFTP handle、socket listener 與 timer；大型目錄、命令輸出及 QEMU console 使用有界緩衝。Disconnected channels release child processes, PTY subscriptions, SFTP handles, socket listeners, and timers; large directories and process output use bounded buffers.
+- **資源生命週期 Resource lifecycle**：SSH channel 中斷會釋放 child process、PTY subscription、SFTP handle、socket listener 與 timer；大型目錄與命令輸出使用有界緩衝。Disconnected channels release child processes, PTY subscriptions, SFTP handles, socket listeners, and timers; large directories and process output use bounded buffers.
 - **生產部署 Production**：環境變數設定、graceful shutdown、JSON log、最大連線數限制。Env-based config, graceful shutdown, JSON logs, max-connection limiting.
 
 ## 快速開始 Quick Start
@@ -200,40 +198,6 @@ client.shell((error, stream) => {
 });
 ```
 
-## QEMU TCG 虛擬機
-
-設定 `VM_ENABLED=true` 後，Node.js 會在啟動 SSH server 前準備並啟動一台 QEMU TCG Debian 12 VM。首次啟動會從 Debian 官方站下載 genericcloud qcow2、核對 `SHA512SUMS`、擴充到 `VM_DISK_GB`，再透過只監聽 localhost 的 NoCloud metadata server 建立 VM SSH 帳號。宿主 SSH/SFTP 保留 `2222`，VM 自己的 SSH/SFTP 預設使用 `2223`。
-
-```dotenv
-VM_ENABLED=true
-VM_RAM_MB=2048
-VM_CPU_LIMIT=1.5
-VM_DISK_GB=20
-VM_MIN_HOST_FREE_GB=2.0
-VM_SSH_HOST_PORT=2223
-VM_SSH_USERNAME=root
-VM_SSH_PASSWORD=replace-with-a-strong-password
-```
-
-除 `VM_SSH_PASSWORD` 外，空白 VM 設定會使用 `.env.example` 記載的預設值；密碼明確留空代表停用密碼登入，此時必須提供 `VM_SSH_AUTHORIZED_KEY`。`VM_RAM_MB` 控制 guest 可見 RAM，QEMU 本身仍有少量額外記憶體 overhead；`VM_DISK_GB` 是 guest 可見的 qcow2 虛擬容量，既有磁碟只會擴大、不會危險地自動縮小。`VM_CPU_LIMIT` 支援一位小數，QEMU 會配置 `ceil(VM_CPU_LIMIT)` 個 vCPU；只有 cgroup v2 可寫時才能精確限制 `1.5` 這類小數 CPU，FeatherPanel cgroup 唯讀時會記錄警告並退回整數 vCPU 上限。
-
-```bash
-ssh -p 2223 root@your-host
-sftp -P 2223 root@your-host
-```
-
-VM 的 SFTP 由 VM 內的 OpenSSH 提供，因此看到的是真正 VM filesystem，不經過宿主的 `src/sftp-server.js`。按 `Ctrl+C` 或向 Node.js 傳送 `SIGTERM` 時，程式會透過 QMP 要求 guest ACPI 關機；逾時後依序使用 `SIGTERM`、`SIGKILL`，確保 Node.js 與 QEMU 一起停止。
-
-首次 TCG 開機期間會輸出 `Waiting for VM to fetch cloud-init metadata`，每 30 秒再輸出 `VM startup is still in progress` 與目前階段。guest 成功取得兩個 NoCloud 檔案後，Node.js 會繼續等待 cloud-init final stage 的具 token `phone_home` 回呼，再確認 SSH banner；三個階段都完成後才會宣告 VM ready。若 QEMU 在任何時刻退出或逾時，錯誤會附上最近 20 行 QEMU console，不再只停在 `Starting QEMU TCG VM`。
-
-使用 VM 密碼時，cloud-init 會建立優先載入的 OpenSSH drop-in，明確開啟 `PasswordAuthentication`；`VM_SSH_USERNAME=root` 時才額外開啟 `PermitRootLogin`，公鑰限定模式不會開啟 root 密碼登入。OpenSSH 重新啟動且 cloud-init final stage 完成後，才寫入與登入設定及 provisioning schema 綁定的 marker 並關閉含憑證的 metadata server；後續啟動不再提供密碼。升級到此修正版時 schema fingerprint 會自動變更，使舊磁碟重新套用一次修正，不需手動刪除 qcow2。
-
-QEMU 以 seccomp sandbox 拒絕提權、額外程序啟動及過時 syscall。這能縮小 guest-to-host 攻擊面，但 QEMU TCG 仍不是 FeatherPanel 宿主權限的替代品；VM 只能使用容器本來允許的 CPU、記憶體、磁碟與網路。
-
-更新後的 Docker image 已包含 `qemu-system-x86` 與 `qemu-utils`。FeatherPanel 原始碼環境缺少 QEMU 時，預設的 `VM_QEMU_AUTO_INSTALL=true` 會使用容器既有的 Debian-compatible APT sources，將經 APT repository 簽章與 package hash 驗證的 `qemu-system-x86`、`qemu-utils`、`seabios` 及必要依賴下載並解壓到 `VM_QEMU_RUNTIME_PATH`。這不需要 root、不修改系統套件，也不下載第三方未簽署 binary；首次啟動需要 `apt-get`、`dpkg-deb`、網路與可寫的 `vm/`。非 root Node 程序本身已受 OS UID 限制，因此會停用無法寫入私有 cache 的 `_apt` 二次降權；root 啟動時仍保留 `_apt` sandbox。成功後後續啟動直接重用本地 runtime。
-
-The optional VM runs Debian 12 under software-only QEMU TCG. Its official image is downloaded and SHA-512 verified automatically, resources are configured through `.env`, and guest SSH/SFTP is exposed separately on port `2223`.
-
 ## 命令白名單 Command Whitelist
 
 ```json
@@ -276,27 +240,6 @@ Running `ssh -p 2222 deploy@host deploy-status` executes exactly the configurati
 | `SSH_MAX_CLIENTS` | `3` | 最大同時連線數 Max clients |
 | `SSH_READY_TIMEOUT_MS` | `20000` | 握手逾時 Handshake timeout |
 | `SSH_LOG_LEVEL` | `info` | 日誌等級 Log level |
-| `VM_ENABLED` | `false` | 是否隨 Node.js 啟動 QEMU TCG VM |
-| `VM_QEMU_BINARY` | `qemu-system-x86_64` | QEMU system binary；空白使用預設值 |
-| `VM_QEMU_IMG_BINARY` | `qemu-img` | qemu-img binary；空白使用預設值 |
-| `VM_QEMU_AUTO_INSTALL` | `true` | 系統缺少 QEMU 時，是否從已簽章的 Debian-compatible APT repository 建立私有 runtime |
-| `VM_QEMU_RUNTIME_PATH` | `./vm/runtime` | 無 root 自動安裝的 QEMU runtime 持久化路徑 |
-| `VM_QEMU_INSTALL_TIMEOUT_MS` | `900000` | APT 更新、下載及解壓 runtime 的單步逾時 |
-| `VM_IMAGE_PATH` | `./vm/debian-12-genericcloud-amd64.qcow2` | 持久化 VM 磁碟路徑 |
-| `VM_IMAGE_URL` | Debian 官方 | 首次啟動的 HTTPS qcow2 來源 |
-| `VM_IMAGE_CHECKSUM_URL` | Debian 官方 | SHA512SUMS HTTPS 來源 |
-| `VM_RAM_MB` | `1024` | guest 可見 RAM，256–32768 MiB；QEMU 有額外 overhead |
-| `VM_CPU_LIMIT` | `1.0` | CPU 額度，支援一位小數；小數硬限制需要可寫 cgroup v2 |
-| `VM_DISK_GB` | `10` | guest 虛擬磁碟容量，只自動擴大不縮小 |
-| `VM_MIN_HOST_FREE_GB` | `2.0` | 下載及啟動前要求的宿主最小剩餘空間 |
-| `VM_SSH_HOST` | `0.0.0.0` | VM SSH/SFTP host-forward 綁定位址 |
-| `VM_SSH_HOST_PORT` | `2223` | VM OpenSSH/SFTP 對外連接埠 |
-| `VM_SSH_USERNAME` | `root` | NoCloud 建立的 VM SSH 帳號 |
-| `VM_SSH_PASSWORD` | `SSH_DEFAULT_PASSWORD` | VM 密碼；可留空並改用 authorized key |
-| `VM_SSH_AUTHORIZED_KEY` | 空白 | VM SSH authorized key；密碼與 key 至少填一項 |
-| `VM_HOSTNAME` | `s12ryt-vm` | VM hostname |
-| `VM_SHUTDOWN_TIMEOUT_MS` | `30000` | QMP graceful shutdown 等待時間 |
-| `VM_METADATA_TIMEOUT_MS` | `300000` | metadata、cloud-init completion 與 SSH readiness 各階段的等待逾時；全部完成後關閉 metadata server |
 
 ## Container Image
 
@@ -320,7 +263,7 @@ The container uses `/app` as its working directory and listens on container port
 1. 建立部署目錄。Create a deployment directory:
 
 ```bash
-mkdir -p s12ryt-ssh/config s12ryt-ssh/keys s12ryt-ssh/s12ryt s12ryt-ssh/vm
+mkdir -p s12ryt-ssh/config s12ryt-ssh/keys s12ryt-ssh/s12ryt
 cd s12ryt-ssh
 ```
 
@@ -365,13 +308,11 @@ Interactive shell is enabled by default; `commands.json` only affects exec comma
 docker run -d --name s12ryt-ssh \
   --restart unless-stopped \
   -p 2222:2222 \
-  -p 2223:2223 \
   -e NODE_ENV=production \
   -v ./config/users.json:/app/config/users.json:ro \
   -v ./config/commands.json:/app/config/commands.json:ro \
   -v ./keys:/app/keys \
   -v ./s12ryt:/app/s12ryt \
-  -v ./vm:/app/vm \
   ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 ```
 
@@ -387,9 +328,6 @@ In container environments such as FeatherPanel, if `ssh-keygen` fails with `No u
 docker logs -f s12ryt-ssh
 ssh -p 2222 root@127.0.0.1
 sftp -P 2222 root@127.0.0.1
-# VM_ENABLED=true 時
-ssh -p 2223 root@127.0.0.1
-sftp -P 2223 root@127.0.0.1
 ```
 
 若部署在遠端主機，請把 `127.0.0.1` 換成主機 IP 或網域。
@@ -405,7 +343,6 @@ services:
     restart: unless-stopped
     ports:
       - "2222:2222"
-      - "2223:2223"
     environment:
       NODE_ENV: production
       SSH_HOST: 0.0.0.0
@@ -418,18 +355,11 @@ services:
       SSH_ENABLE_SHELL: "true"
       SSH_SHELL_CWD: /app/s12ryt
       SSH_MAX_CLIENTS: 3
-      VM_ENABLED: "false"
-      VM_RAM_MB: 1024
-      VM_CPU_LIMIT: 1.0
-      VM_DISK_GB: 10
-      VM_SSH_HOST_PORT: 2223
-      VM_SSH_PASSWORD: ChangeMe123!
     volumes:
       - ./config/users.json:/app/config/users.json:ro
       - ./config/commands.json:/app/config/commands.json:ro
       - ./keys:/app/keys
       - ./s12ryt:/app/s12ryt
-      - ./vm:/app/vm
 ```
 
 啟動與查看狀態。Start and inspect:
@@ -449,13 +379,11 @@ docker rm s12ryt-ssh
 docker run -d --name s12ryt-ssh \
   --restart unless-stopped \
   -p 2222:2222 \
-  -p 2223:2223 \
   -e NODE_ENV=production \
   -v ./config/users.json:/app/config/users.json:ro \
   -v ./config/commands.json:/app/config/commands.json:ro \
   -v ./keys:/app/keys \
   -v ./s12ryt:/app/s12ryt \
-  -v ./vm:/app/vm \
   ghcr.io/s12ryt/s12ryt-nodejs-ssh:latest
 ```
 
@@ -471,7 +399,6 @@ docker compose up -d
 - `config/users.json` 可能在第一次啟動前短暫包含明文密碼，請限制主機上的檔案權限。
 - `keys/` 內的 host key 必須持久保存；刪除後重新產生會讓 SSH client 出現 host key changed 警告。
 - `s12ryt/` 會保存使用者透過 shell/SFTP 建立、下載或安裝的檔案，更新 image 不會清掉它。
-- `vm/` 保存 qcow2；啟用 VM 時必須持久掛載，並把 `VM_SSH_PASSWORD` 換成強密碼或改用公鑰。
 - `SSH_SFTP_FOLLOW_SHELL_CWD=true` 時 SFTP 不受 `SSH_SFTP_ROOT` 沙箱限制，可讀寫 Node.js 程序有權存取的整個容器檔案系統；只應提供給完全可信的帳號。
 - 若要對外開放 `2222`，請搭配防火牆或雲端 security group，只允許可信 IP。
 - `config/commands.json` 不要加入 `sh -c`、`cmd /c`、`powershell -Command` 這類 shell 包裝器。
@@ -492,12 +419,6 @@ docker compose up -d
 | `No user exists for uid ...` | 這是容器使用者沒有 `/etc/passwd` 記錄導致 `ssh-keygen` 失敗；新版 `start.js` 會自動 fallback 到 Node.js crypto 產生 RSA host key。 |
 | `npm ERR! path /app/package.json` | 檢查 `docker run` / Compose 是否把主機目錄掛到 `/app`，請移除 `-v ...:/app` 或 `.:/app`，只保留 `config/users.json`、`config/commands.json`、`keys/`、`s12ryt/` 這幾個掛載。 |
 | `[start] Missing template file: .env.example` | 代表 image 內缺少啟動範本檔。請重新拉取或重新 build 最新 image；不要用舊版 image 搭配新版部署文件。 |
-| `QEMU runtime is unavailable` | 新版會預設自動建立 `vm/runtime`。若仍失敗，查看後續訊息確認容器是否有 `apt-get`、`dpkg-deb`、有效 APT sources、外網權限及可寫空間；也可設定有效的 `VM_QEMU_BINARY` / `VM_QEMU_IMG_BINARY`。 |
-| QEMU runtime 自動安裝中斷 | 刪除未完成的 `vm/runtime.install-*` 與 `vm/runtime.install-*.apt` 後重啟；正式的 `vm/runtime` 只會在完整驗證成功後原子替換。 |
-| VM 的 2223 無法連線 | 第一次下載與 TCG 開機需要時間；確認面板已配置 2223/TCP、日誌沒有 port conflict，並在 VM console log 等待 cloud-init 完成。 |
-| 停在 `Waiting for VM to fetch cloud-init metadata` | guest 尚未完成開機或網路初始化；新版每 30 秒輸出 elapsed time，QEMU 退出/逾時會附最近 console。若始終沒有 `VM requested cloud-init metadata`，請貼出最終 timeout 與 `Recent QEMU output`。 |
-| 已顯示 `VM fetched cloud-init metadata` 但仍未完成 | NoCloud 已成功，問題縮小到 guest cloud-init/sshd；等待 `Waiting for VM SSH readiness` 的最終錯誤並確認 FeatherPanel 對外 port 與 `VM_SSH_HOST_PORT` 一致。 |
-| 小數 CPU 限制出現 fallback | cgroup v2 不可寫；VM 仍限制為向上取整後的 vCPU 數，但無法保證小數 CPU quota。 |
 
 ## 專案結構 Project Structure
 
@@ -511,7 +432,6 @@ docker compose up -d
 | `src/fs-safe.js` | SFTP 路徑沙箱。SFTP path sandboxing. |
 | `src/shell-runner.js` | 預設啟用的 PTY 互動 shell。PTY interactive shell enabled by default. |
 | `src/config.js` | 環境變數讀取與驗證。Env config loading/validation. |
-| `src/vm-*.js` / `src/qmp-client.js` | VM 設定、簽章 APT runtime、映像、NoCloud、CPU 限額與 QEMU lifecycle。 |
 | `src/logger.js` | JSON 結構化日誌。Structured JSON logging. |
 | `scripts/` | 初始化、密碼雜湊、host key 產生工具。Setup utilities. |
 | `config/` | 使用者與命令白名單設定範本。Config templates. |
@@ -522,7 +442,6 @@ docker compose up -d
 
 - 不要把 `keys/`、`.env`、`config/users.json`、`config/commands.json` 提交到版本控制。Never commit secrets.
 - `s12ryt/` 是使用者 SSH/SFTP 工作目錄，可能包含下載、安裝或產生的檔案，預設已忽略。`s12ryt/` is the SSH/SFTP workspace and is git-ignored by default.
-- `vm/` 與 `.env` 可能包含 VM 磁碟及登入憑證，已排除版控；請限制檔案權限並定期備份 qcow2。
 - 不要在 `commands.json` 加入 shell 包裝器，例如 `sh -c`、`cmd /c`、`powershell -Command`。Do not add shell wrappers to the whitelist.
 - 互動 shell 預設開啟，請只給可信使用者帳號；互動 shell 等同開放該服務帳號的任意命令執行能力。Interactive shell is enabled by default; only create accounts for trusted users.
 - 若要開放參數，請只對低風險命令設定 `allowClientArgs: true`。Enable `allowClientArgs` only for low-risk commands.
@@ -539,8 +458,8 @@ npm run check
 
 此指令會執行 Node 語法檢查與 `node --test`。Runs syntax checks plus the `node --test` suite.
 
-資源回歸測試涵蓋 exec 中斷與強制終止、PTY/SFTP channel 清理、QMP socket listener、runtime command output 上限，以及 QEMU 超長 console 行。SFTP 單次 read 上限為 64 KiB、目錄每批最多 50 筆；runtime stdout/stderr 各保留最後 256 KiB，避免診斷資料與 VM 爭用不必要的 Node.js heap。
-Resource regression tests cover interrupted exec processes, PTY/SFTP cleanup, QMP listeners, bounded runtime output, and oversized QEMU console lines.
+資源回歸測試涵蓋 exec 中斷與強制終止與 PTY/SFTP channel 清理；SFTP 單次 read 上限為 64 KiB、目錄每批最多 50 筆。
+Resource regression tests cover interrupted exec processes, PTY/SFTP cleanup, and bounded SFTP reads.
 
 ## 貢獻 Contributing
 
