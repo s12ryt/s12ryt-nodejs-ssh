@@ -209,3 +209,7 @@ ode start.js 冒煙 PID 存活且 2222 監聽中
   - TDD：新增 `test/shell-home.test.js` RED（2/2 失敗）→ GREEN；另一 session 的 `test/config-bootstrap.test.js` 改為斷言不再有 `shellCwd`。
   - 文件：README 移除 `s12ryt/` 工作區、`SSH_SHELL_CWD` 與 docker 掛載說明；CHANGELOG 新增 Changed；`agent/項目表.md` 移除 `s12ryt/` 列。
   - 驗證：`npm run check` Syntax 38 檔，tests 102 / pass 96 / fail 0 / skipped 6。
+- [x] 修正家目錄不可用時 shell 啟動失敗（2026-11-24）：
+  - 用戶回報 `chdir(2) failed.: Permission denied`：shell 以無權限的家目錄作為 cwd，node-pty spawn 失敗（服務非 root、或 `/home/<帳號>` 無法建立時）。
+  - `ensureHomeDirectory` 改為驗證目錄存在且可讀可進入，否則回傳 `null`；`src/server.js` 新增 `homeFor`：shell 以 `os.homedir()` 備援，SFTP 在跟隨模式以 `os.homedir()`、沙箱模式以根目錄為起點，並記錄 warn。
+  - TDD：新增 `test/home-fallback.test.js`（RED → GREEN）；README、CHANGELOG 同步說明備援行為。

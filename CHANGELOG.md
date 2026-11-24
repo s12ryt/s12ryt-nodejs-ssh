@@ -14,6 +14,7 @@
 - 修正 `loadConfig()` 在 `SSH_SFTP_ROOT` 未設定時對機器根目錄呼叫 `mkdirSync`，Windows 會以 `EPERM` 中止 `npm start` 的缺陷。Fixed `loadConfig()` calling `mkdirSync` on the machine root, which aborted `npm start` with `EPERM` on Windows.
 - `start.js` 不再以過時的 `./s12ryt` 作為 `SSH_SFTP_ROOT` 預設值，與 `src/config.js` 的機器根語意對齊。`start.js` no longer hardcodes the stale `./s12ryt` default for `SSH_SFTP_ROOT`.
 - `SSH_DEFAULT_PASSWORD` 新增 bcrypt 72 byte 上限檢查，避免先寫出 `config/users.json` 才在 `normalizeUsers()` 拋錯。Added the bcrypt 72-byte limit to `SSH_DEFAULT_PASSWORD` so startup fails before writing `config/users.json`.
+- 修正家目錄因 OS 權限無法建立或不可存取時互動 shell 啟動失敗（node-pty：`chdir(2) failed.: Permission denied`）：shell 改以服務帳號的家目錄啟動，SFTP 在跟隨模式改以該處、沙箱模式改以根目錄為起點。Falls back to the service account home directory when the user home directory cannot be created or accessed.
 
 ### Security 安全
 

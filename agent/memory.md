@@ -178,3 +178,7 @@
   - `SSH_SHELL_CWD` 與 `s12ryt/` 工作區已從 config、start.js、Dockerfile、ignore 規則、`.env.example`、README 移除；本地空的 `s12ryt/` 資料夾保留未刪。
   - `$HOME` 環境變數仍反映 runtime OS 帳號（未調整）；同一工作樹另有 CVE 稽核 session 的未提交變更（`start.js`、`Dockerfile`、`.env.example`、`test/config-bootstrap.test.js` 僅做最小行級修改）。
   - `npm run check`：Syntax 38 檔，tests 102 / pass 96 / fail 0 / skipped 6；本輪變更尚未 commit / push。
+- 修正家目錄不可用時 shell 啟動失敗（2026-11-24）：
+  - 成因：`ensureHomeDirectory` 吞掉 mkdir 錯誤仍回傳路徑，node-pty 對不可存取的 cwd 報 `chdir(2) failed.: Permission denied`。
+  - 修正：`ensureHomeDirectory` 驗證可用性後才回傳路徑（否則 `null`）；server 以 `homeFor` 退回 `os.homedir()`（SFTP 沙箱模式則退回根目錄）。
+  - 新增 `test/home-fallback.test.js`；README、CHANGELOG 已同步；本輪尚未 commit / push。
