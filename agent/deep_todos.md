@@ -141,3 +141,11 @@
   - 修復 Linux PTY 測試將 shell 輸入回顯誤判為執行完成的競態，marker 改為兩段輸出後再比對完整值。
   - 移除 force-kill safety timer 的 `unref()`，確保 fake child 與真實 child 都會執行 SIGKILL 升級。
   - 最終程式 commit `98090247e547c809690809184b5f250849fe4d05`：CI run `30183220986` 與 GHCR Image run `30183220981` 均成功。
+- [x] 回退為純 SSH、移除 QEMU VM（2026-11-24）：
+  - 用戶確認「完整 SSH、移除 VM」＋「新提交並推送」：不改寫歷史，保留 `5925441` 之後全部 SSH 修正。
+  - 備份：`backup/main-before-vm-removal` 指向 `e7fe140`；未提交的 VM 效能調校存入 `stash@{0}`，未刪除。
+  - TDD：`test/no-vm.test.js` 先 RED（4/4 失敗）後 GREEN；刪除 7 個 `src/vm-*.js` / `src/qmp-client.js` 與 7 個對應測試。
+  - 整合點還原：`src/index.js`、`Dockerfile`、`.gitignore`、`.dockerignore`、`.env.example` 與 `5925441` 相同；`src/config.js` 僅保留 `sftpFollowShellCwd`；`package.json` description / keywords 回到 pre-VM 字樣（依賴不變）。
+  - 文件：README 移除 QEMU 章節、`VM_*` 表格、Docker 2223 與 `vm/` 掛載及疑難排解；CHANGELOG 新增 Removed；SECURITY.md 與 `agent/項目表.md` 移除 VM 條目。
+  - 驗證：`npm run check` Syntax 23 檔，tests 42 / pass 38 / fail 0 / skipped 4；11 顆提交在暫存 worktree 逐一執行語法檢查與測試全綠。
+  - 提交：`8f78a4f`..`710bfa7` 共 11 顆（1 `feat!`、7 `refactor`、1 `test`、2 `docs`），已以一般推送更新 `origin/main`。

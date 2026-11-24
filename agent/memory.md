@@ -131,3 +131,8 @@
   - 首次推送資源優化後，Linux integration test 因 PTY 會回顯尚未執行的 `printf marker`，SFTP 過早啟動而讀到原 cwd；將 marker 拆成兩段由 shell 合成，完整 marker 只會出現在真正執行輸出。
   - command-runner force-kill timer 原本 `unref()`，fake child 沒有 OS handle 時 Node test 會在 SIGKILL 前結束並回報 `cancelledByParent`；移除 `unref()` 後 timer 由 child close 正常清除，並保證強制終止一定執行。
   - 程式最終 commit `98090247e547c809690809184b5f250849fe4d05` 已推送至 `origin/main`；GitHub Actions CI（Node 20.x / 22.x）run `30183220986` success，GHCR Image run `30183220981` success。
+- 回退為純 SSH、移除 QEMU VM（2026-11-24）：
+  - 用戶選擇保留完整 SSH、移除 VM，並以新提交推送（不改寫歷史）；備份分支 `backup/main-before-vm-removal`（`e7fe140`）與 `stash@{0}`（VM 效能調校）保留。
+  - 刪除 `src/vm-*.js`、`src/qmp-client.js` 與 7 個測試；`src/index.js`、`Dockerfile`、`.gitignore`、`.dockerignore`、`.env.example` 還原為 `5925441` 版本，`src/config.js` 只保留 `sftpFollowShellCwd`，`package.json` 僅調整 description / keywords。
+  - README、CHANGELOG（新增 Removed）、SECURITY.md、`agent/項目表.md` 同步移除 VM 內容；新增守衛測試 `test/no-vm.test.js`。
+  - `npm run check`：Syntax 23 檔，tests 42 / pass 38 / fail 0 / skipped 4；11 顆提交（`8f78a4f`..`710bfa7`）逐一驗證全綠，已推送 `origin/main`。
