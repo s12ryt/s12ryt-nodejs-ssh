@@ -1,15 +1,17 @@
+// start.js
+// 1. loadEnv：補齊 .env 並解析各執行期路徑（L43-56）
+// 2. ensureDirectories / ensureCommandsFile / ensureUsersFile：補齊執行期檔案（L58-88）
+// 3. main：產生 host key 後載入 src/index.js（L90-103）
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
+import { ensureHostKey } from './src/host-key.js';
+import { resolveDefaultUsername, resolveDefaultPassword } from './src/dev-credentials.js';
+
+const root = import.meta.dirname;
 process.chdir(root);
 
-const defaultUsernameFallback = 'deploy';
-const defaultPasswordFallback = 'ChangeMe123!';
 const envPath = path.join(root, '.env');
 const envExamplePath = path.join(root, '.env.example');
 const commandsExamplePath = path.join(root, 'config', 'commands.example.json');
@@ -17,46 +19,23 @@ let commandsPath;
 let usersPath;
 let hostKeyPath;
 let sftpRoot;
-let shellCwd;
 
 function log(message) {
   console.log(`[start] ${message}`);
 }
 
-function isProduction() {
-  return process.env.NODE_ENV === 'production';
-}
-
 function resolveRuntimePath(envName, fallback) {
   const value = process.env[envName] || fallback;
-  return path.resolve(root, value);
-}
-
-function readDefaultUsername() {
-  const username = (process.env.SSH_DEFAULT_USERNAME || defaultUsernameFallback).trim();
-  if (!username) {
-    throw new Error('SSH_DEFAULT_USERNAME must not be empty');
-  }
-  return username;
-}
-
-function readDefaultPassword() {
-  const password = process.env.SSH_DEFAULT_PASSWORD || defaultPasswordFallback;
-  if (password.length < 8) {
-    throw new Error('SSH_DEFAULT_PASSWORD must be at least 8 characters');
-  }
-  return password;
+  return value ? path.resolve(root, value) : undefined;
 }
 
 function copyIfMissing(source, target) {
   if (fs.existsSync(target)) {
     return false;
   }
-
   if (!fs.existsSync(source)) {
     throw new Error(`Missing template file: ${path.relative(root, source)}`);
   }
-
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(source, target);
   return true;
@@ -71,12 +50,13 @@ function loadEnv() {
   commandsPath = resolveRuntimePath('SSH_COMMANDS_FILE', './config/commands.json');
   usersPath = resolveRuntimePath('SSH_USERS_FILE', './config/users.json');
   hostKeyPath = resolveRuntimePath('SSH_HOST_KEY_PATH', './keys/ssh_host_ed25519_key');
-  sftpRoot = resolveRuntimePath('SSH_SFTP_ROOT', './s12ryt');
-  shellCwd = resolveRuntimePath('SSH_SHELL_CWD', './s12ryt');
+  // 未設定時 src/config.js 以機器根目錄當虛擬根，這裡不得再建立過時的沙箱目錄。
+  sftpRoot = resolveRuntimePath('SSH_SFTP_ROOT', '');
 }
 
 function ensureDirectories() {
-  for (const directory of [path.dirname(hostKeyPath), path.dirname(usersPath), path.dirname(commandsPath), sftpRoot, shellCwd]) {
+  const targets = [path.dirname(hostKeyPath), path.dirname(usersPath), path.dirname(commandsPath), sftpRoot];
+  for (const directory of targets.filter(Boolean)) {
     fs.mkdirSync(directory, { recursive: true });
   }
 }
@@ -92,75 +72,17 @@ function ensureUsersFile() {
     return;
   }
 
-  if (isProduction()) {
+  if (process.env.NODE_ENV === 'production') {
     throw new Error(
       `Missing ${path.relative(root, usersPath)}. Create production users first from config/users.example.json.`
     );
   }
 
-  const username = readDefaultUsername();
-  const password = readDefaultPassword();
-  const users = [{ username, password, authorizedKeys: [] }];
+  const username = resolveDefaultUsername();
+  const users = [{ username, password: resolveDefaultPassword(), authorizedKeys: [] }];
   fs.mkdirSync(path.dirname(usersPath), { recursive: true });
   fs.writeFileSync(usersPath, `${JSON.stringify(users, null, 2)}\n`);
   log(`Created ${path.relative(root, usersPath)} with development user ${username}`);
-}
-
-function writeNodeGeneratedHostKey(target) {
-  const { privateKey } = generateKeyPairSync('rsa', {
-    modulusLength: 3072,
-    privateKeyEncoding: {
-      type: 'pkcs1',
-      format: 'pem'
-    },
-    publicKeyEncoding: {
-      type: 'spki',
-      format: 'pem'
-    }
-  });
-
-  fs.writeFileSync(target, privateKey, { mode: 0o600 });
-  log(`Generated RSA host key without ssh-keygen at ${path.relative(root, target)}`);
-}
-
-function describeCommandFailure(result) {
-  if (result.error) {
-    return result.error.message;
-  }
-
-  const stderr = result.stderr?.toString().trim();
-  if (stderr) {
-    return stderr;
-  }
-
-  return `ssh-keygen exited with status ${result.status ?? 1}`;
-}
-
-function ensureHostKey() {
-  if (fs.existsSync(hostKeyPath)) {
-    return;
-  }
-
-  fs.mkdirSync(path.dirname(hostKeyPath), { recursive: true });
-  log(`Generating SSH host key at ${path.relative(root, hostKeyPath)}`);
-
-  const result = spawnSync('ssh-keygen', ['-t', 'ed25519', '-f', hostKeyPath, '-N', '', '-C', 'nodejs-ssh-server'], {
-    encoding: 'utf8',
-    shell: false
-  });
-
-  if (result.error || result.status !== 0) {
-    log(`ssh-keygen failed, falling back to Node.js crypto host key generation: ${describeCommandFailure(result)}`);
-    writeNodeGeneratedHostKey(hostKeyPath);
-  } else if (result.stdout) {
-    process.stdout.write(result.stdout);
-  }
-
-  try {
-    fs.chmodSync(hostKeyPath, 0o600);
-  } catch (error) {
-    log(`Warning: failed to chmod host key: ${error.message}`);
-  }
 }
 
 async function main() {
@@ -168,7 +90,10 @@ async function main() {
   ensureDirectories();
   ensureCommandsFile();
   ensureUsersFile();
-  ensureHostKey();
+
+  if (ensureHostKey(hostKeyPath, log) !== 'existing') {
+    log(`Generated SSH host key at ${path.relative(root, hostKeyPath)}`);
+  }
 
   log('Runtime files are ready. Starting SSH server.');
   await import('./src/index.js');

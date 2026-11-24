@@ -163,7 +163,7 @@ function loadPty() {
 
 export function createShellRunner(config, logger, dependencies = {}) {
   const shellPath = config.shellPath || defaultShellPath();
-  const shellCwd = config.shellCwd || process.cwd();
+  const resolveShellCwd = typeof config.shellCwd === 'function' ? config.shellCwd : () => config.shellCwd;
   const getPty = dependencies.loadPty || loadPty;
 
   function stderrFor(stream) {
@@ -176,6 +176,7 @@ export function createShellRunner(config, logger, dependencies = {}) {
       const cols = normalizePositiveInteger(ptyInfo.cols, DEFAULT_COLS);
       const rows = normalizePositiveInteger(ptyInfo.rows, DEFAULT_ROWS);
       const term = ptyInfo.term || 'xterm-256color';
+      const shellCwd = resolveShellCwd(context) || process.cwd();
 
       let exited = false;
       let closed = false;

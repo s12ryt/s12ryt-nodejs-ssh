@@ -1,3 +1,4 @@
+import { machineRoot } from './sftp-fs.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
@@ -48,21 +49,30 @@ export function loadConfig() {
     hostKeyPath: resolveFromRoot(process.env.SSH_HOST_KEY_PATH || './keys/ssh_host_ed25519_key'),
     usersFile: resolveFromRoot(process.env.SSH_USERS_FILE || './config/users.json'),
     commandsFile: resolveFromRoot(process.env.SSH_COMMANDS_FILE || './config/commands.json'),
-    sftpRoot: resolveFromRoot(process.env.SSH_SFTP_ROOT || './s12ryt'),
+    sftpRoot: process.env.SSH_SFTP_ROOT ? resolveFromRoot(process.env.SSH_SFTP_ROOT) : machineRoot(rootDir),
     sftpFollowShellCwd: readBoolean('SSH_SFTP_FOLLOW_SHELL_CWD', true),
     enableShell: readBoolean('SSH_ENABLE_SHELL', true),
     shellPath: process.env.SSH_SHELL_PATH || undefined,
-    shellCwd: resolveFromRoot(process.env.SSH_SHELL_CWD || './s12ryt'),
-    maxClients: readInteger('SSH_MAX_CLIENTS', 3, { min: 1, max: 100 }),
+    maxClients: readInteger('SSH_MAX_CLIENTS', 64, { min: 1, max: 4096 }),
+    maxClientsPerIp: readInteger('SSH_MAX_CLIENTS_PER_IP', 8, { min: 1, max: 4096 }),
+    maxAuthFailures: readInteger('SSH_MAX_AUTH_FAILURES', 5, { min: 1, max: 100 }),
+    maxSessionsPerClient: readInteger('SSH_MAX_SESSIONS_PER_CLIENT', 8, { min: 1, max: 100 }),
     readyTimeoutMs: readInteger('SSH_READY_TIMEOUT_MS', 20000, { min: 1000 }),
     logLevel: process.env.SSH_LOG_LEVEL || 'info'
   };
+
+  // 虛擬根可能是機器根目錄（Windows 的 `F:\`），對既有目錄呼叫 mkdir 會得到 EPERM。
+  function ensureDirectory(target) {
+    if (fs.existsSync(target)) {
+      return;
+    }
+    fs.mkdirSync(target, { recursive: true });
+  }
 
   if (!fs.existsSync(config.hostKeyPath)) {
     throw new Error(`SSH host key not found: ${config.hostKeyPath}`);
   }
 
-  fs.mkdirSync(config.sftpRoot, { recursive: true });
-  fs.mkdirSync(config.shellCwd, { recursive: true });
+  ensureDirectory(config.sftpRoot);
   return config;
 }
