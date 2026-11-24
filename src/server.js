@@ -13,6 +13,7 @@ import { createCommandRunner } from './command-runner.js';
 import { createConnectionGuard } from './connection-guard.js';
 import { attachSftpServer } from './sftp-server.js';
 import { ensureHomeDirectory } from './sftp-fs.js';
+import os from 'node:os';
 import { createShellRunner } from './shell-runner.js';
 
 const { Server } = ssh2;
@@ -50,8 +51,14 @@ export const ALGORITHMS = {
 export function createSshServer(config, logger) {
   const authenticator = createAuthenticator(config.usersFile);
   const commandRunner = createCommandRunner(config.commandsFile, logger);
+  function homeFor(username, fallback) {
+    const home = ensureHomeDirectory(config.sftpRoot, username);
+    if (!home && fallback) logger.warn('Home directory unavailable, using fallback', { username, fallback });
+    return home || fallback;
+  }
+
   const shellRunner = createShellRunner(
-    { ...config, shellCwd: ({ username }) => ensureHomeDirectory(config.sftpRoot, username) },
+    { ...config, shellCwd: ({ username }) => homeFor(username, os.homedir()) },
     logger
   );
   const guard = createConnectionGuard({
@@ -191,7 +198,7 @@ export function createSshServer(config, logger) {
             logger.info('SFTP session started', { username: context.username });
             attachSftpServer(sftp, config.sftpRoot, logger, context, {
               followShellCwd: config.sftpFollowShellCwd,
-              home: ensureHomeDirectory(config.sftpRoot, context.username),
+              home: homeFor(context.username, config.sftpFollowShellCwd ? os.homedir() : undefined),
               getShellCwd() {
                 return latestActiveShell()?.getCwd?.();
               },

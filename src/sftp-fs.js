@@ -1,7 +1,7 @@
 // ===== SFTP 虛擬檔案系統工具（讓 SFTP 呈現方式貼近真實 VPS）=====
 // 功能索引：
 // 1. 機器根目錄    machineRoot → SSH_SFTP_ROOT 未設定時的 SFTP 虛擬根
-// 2. 家目錄        homeDirectoryFor / ensureHomeDirectory → root → <root>/root，其他 → <root>/home/<user>
+// 2. 家目錄        homeDirectoryFor / ensureHomeDirectory → root → <root>/root，其他 → <root>/home/<user>；無法建立或不可存取時回傳 null
 // 3. 擁有者名稱    createOwnerNames → 由 <root>/etc/passwd、etc/group 查 uid/gid 對應名稱
 // 4. ls -l 字串    formatLongName → 權限（含 s/S/t/T）、連結數、擁有者、群組、大小、時間、-> 目標
 // 5. 屬性變更      applyStatChanges → chmod / chown / utimes（路徑或檔案描述符）
@@ -23,16 +23,24 @@ export function homeDirectoryFor(root, username) {
   return username === 'root' ? path.join(root, 'root') : path.join(root, 'home', username);
 }
 
+function isUsableDirectory(directory) {
+  try {
+    fs.accessSync(directory, fs.constants.R_OK | fs.constants.X_OK);
+    return fs.statSync(directory).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function ensureHomeDirectory(root, username) {
   const home = homeDirectoryFor(root, username);
-  if (!fs.existsSync(home)) {
-    try {
-      fs.mkdirSync(home, { recursive: true });
-    } catch {
-      // 無權限建立時交由後續檔案操作回報
-    }
+  if (isUsableDirectory(home)) return home;
+  try {
+    fs.mkdirSync(home, { recursive: true });
+  } catch {
+    // 無權限建立時交由呼叫端備援
   }
-  return home;
+  return isUsableDirectory(home) ? home : null;
 }
 
 export function createOwnerNames(root) {
