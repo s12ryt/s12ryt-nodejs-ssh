@@ -149,3 +149,63 @@
   - 文件：README 移除 QEMU 章節、`VM_*` 表格、Docker 2223 與 `vm/` 掛載及疑難排解；CHANGELOG 新增 Removed；SECURITY.md 與 `agent/項目表.md` 移除 VM 條目。
   - 驗證：`npm run check` Syntax 23 檔，tests 42 / pass 38 / fail 0 / skipped 4；11 顆提交在暫存 worktree 逐一執行語法檢查與測試全綠。
   - 提交：`8f78a4f`..`710bfa7` 共 11 顆（1 `feat!`、7 `refactor`、1 `test`、2 `docs`），已以一般推送更新 `origin/main`。
+- [x] SFTP 檔案系統靠齊真實 VPS（2026-11-24）：
+  - 需求確認（`agent/question.md`）：目錄結構＋檔案屬性＋操作完整性；虛擬根目錄直接對應機器根；只改 SFTP、shell 不動。
+  - 新增 `src/sftp-fs.js`（機器根、家目錄 `root`→`/root` 其餘→`/home/<帳號>`、`/etc/passwd`·`/etc/group` 名稱解析、`ls -l` 字串、chmod/chown/utime）與 `src/sftp-extended.js`（READLINK / SYMLINK / LINK / SETSTAT / FSETSTAT）。
+  - `sftp-server.js`：登入落在家目錄、`resolveSftpPath` 支援 `home` 與 Buffer 路徑、沙箱模式 `..` 正規化、READDIR 改 lstat 並顯示連結目標、`toAttrs` 回報真實 uid/gid；`config.js` 的 `SSH_SFTP_ROOT` 未設定時為機器根；`server.js` 掛上 `home`。
+  - TDD：`test/sftp-fs.test.js`、`test/sftp-extended.test.js` 先 RED（tests 7 / fail 5 / skipped 2）後 GREEN；既有沙箱 `..` 擲錯的斷言改為正規化結果。
+  - 驗證：`npm run check` Syntax 27 檔，tests 56 / pass 50 / fail 0 / skipped 6（4 個 PTY 整合測試＋2 個需符號連結權限的測試在 Windows 略過）。
+  - 文件：README、`.env.example`、CHANGELOG（Changed＋Added）同步更新；尚未提交 git。
+
+- [x] CVE 遺漏盤查（2026-11-24，純稽核，未改碼）：
+  - 用戶需求：「請你幫我檢查當前項目有沒有遺漏的CVE漏洞」。完整報告：`agent/cve-audit-2026-11-24.md`。
+  - 基線：`npm audit` 0 vulnerabilities（prod 45 / dev 0 / optional 3 / total 47），故所有發現皆為 audit 偵測不到的遺漏。
+  - P0-1 Node.js 20 已於 2026-04-30 EOL：Dockerfile 兩 stage 與 CI matrix 仍固定 20，錯過 2026-07（11 CVE）、10-21（10 CVE）、11-11（16 CVE）三輪修補；含列入 CISA KEV 的 CVE-2026-111497（Brotli decoder overflow，remote unauth 潛在 RCE，修在 22.23.4 / 24.22.1 / 26.12.1，20.x 永不修）；另有 EOL 專屬 CVE-2025-23087/23088/23089。
+  - P0-2 lockfile 鎖到 ssh2@1.17.0，正是 CVE-2025-70034（CWE-1333 ReDoS，CVSS:3.1 AV:N/AC:L/PR:N/A:H）唯一受影響版本，上游尚無 patch，可降回 1.16.0 規避。Terrapin CVE-2023-48795 已在 1.15.0 修復、不受影響。
+  - base image OS layer：CVE-2026-8376、CVE-2026-13221（Perl regcomp）、CVE-2026-59873（Node 捆綁 node-tar < 7.5.19 gzip bomb）；依賴樹的 tar-fs@2.1.5 已是 GHSA-xrg4-qp5w-2c3w 修補版，與此無關。bcryptjs 2.4.3 / dotenv 16.6.1 / node-pty-prebuilt-multiarch 0.13.1 無未修復 CVE。
+  - 程式碼層（audit 盲區）：auth.js dummy hash cost 10 vs 真實 cost 12 使反時序設計失效、仍可帳號列舉；verifyPassword 無 72-byte 上限（bcrypt 靜默截斷＋CPU 放大）；verifyPublicKey 對不存在使用者早退；server.js 無認證失敗上限/速率限制；maxClients 預設 3 且無 per-IP 限制（3 條閒置連線即 DoS）；未顯式設定 algorithms；session/channel 無 per-connection 上限。
+  - 供應鏈流程：CI 無 `npm audit` / SCA gate、無映像掃描、無 Dependabot、base image 未 pin digest。
+  - 本輪未修改任何程式碼，無 RED/GREEN；修復待用戶決定，落地時需先寫 RED 測試。
+
+## [x] CVE 全面修復（2026-11-24）
+
+依 `agent/cve-audit-2026-11-24.md` 的 P0~P3 全部落地，TDD RED→GREEN。
+
+- RED：新增 `test/supply-chain.test.js`（8）、`test/connection-guard.test.js`（7）、`test/auth-password-policy.test.js`（8）、`test/server-hardening.test.js`（5）
+- GREEN P0-1：Dockerfile 兩 stage、`package.json` engines、CI matrix、README badge/標語全部升 Node 24 LTS
+- GREEN P0-2：`ssh2` 由 `^1.16.0` 釘選為 `1.16.0`，lockfile 由 1.17.0 重建為 1.16.0（規避 CVE-2025-70034）
+- GREEN C-1：`src/auth.js` dummy bcrypt cost 10 → 12（`BCRYPT_COST`）
+- GREEN C-3：新增 `MAX_PASSWORD_BYTES=72` / `passwordByteLength()`，`normalizeUsers` 與 `verifyPassword` 雙側拒絕超長密碼
+- GREEN C-2/C-4/C-6：新增 `src/connection-guard.js`，`src/server.js` 接入全域/per-IP/認證失敗/channel 四道限額；`src/config.js` 新增 `SSH_MAX_CLIENTS_PER_IP`、`SSH_MAX_AUTH_FAILURES`、`SSH_MAX_SESSIONS_PER_CLIENT`，`SSH_MAX_CLIENTS` 預設 3 → 64
+- GREEN C-5：`src/server.js` 匯出 `ALGORITHMS` 顯式白名單（curve25519/ECDH、ChaCha20-Poly1305、AES-GCM/CTR、SHA-2 ETM）
+- GREEN D：CI 加 `npm audit --audit-level=high`、ghcr.yml 加 Trivy（exit-code 1 / CRITICAL,HIGH）、新增 `.github/dependabot.yml`（npm + github-actions + docker）
+- 文件：README（badge/標語/env 表/專案結構/驗證段）、CHANGELOG Unreleased → Security、SECURITY.md 硬化基線、`.env.example` 四個限額變數
+- 驗證：`npm run check` Syntax 32 檔，tests 84 / pass 78 / fail 0 / skipped 6（Windows PTY 4 + symlink 2）；`npm audit` 0 vulnerabilities
+
+## [x] start.js 現版相容性稽核與修復（2026-11-24）
+
+- 稽核結論：start.js 無 VM 殘留，但有三處與現版不相容。
+- 修復 1（安全）：host key fallback 由 RSA 改 ecdsa-sha2-nistp256。ssh2 lib/server.js:263-290 對 RSA 金鑰在 ssh-rsa 不在清單時以 sha1Pos = Infinity 仍登記 ssh-rsa，且 serverHostKey: hostKeyAlgoOrder 不受我們設定的白名單過濾，會讓 SHA-1 host key 簽章重新上架。
+- 修復 2：SSH_DEFAULT_PASSWORD 補上 bcrypt 72 byte 上限，避免 users.json 先落地才在 normalizeUsers() 拋錯。
+- 修復 3：start.js 的 SSH_SFTP_ROOT 預設 './s12ryt' 與 src/config.js 的機器根語意不一致，已改為未設定時不建目錄。
+- 修復 4（既有缺陷）：src/config.js 對機器根呼叫 mkdirSync，Windows EPERM 讓 npm start 完全無法啟動；改為 ensureDirectory() 先檢查存在。
+- 新增 src/host-key.js、src/dev-credentials.js；scripts/generate-host-key.js 與 scripts/setup-dev.js 改為委派共用模組。
+- 新增 test/start-script.test.js（9）、test/config-bootstrap.test.js（2）。
+- 驗證：Syntax 36 檔；tests 95 / pass 89 / fail 0 / skipped 6；npm start 實機啟動成功。
+
+## .env 遺留稽核與修復（2026-11-24）
+
+- [x] 稽核 .env / .env.example：兩檔原本位元組完全相同（589 bytes），無 QEMU/VM 殘留，但遺漏程式實際讀取的 SSH_SFTP_FOLLOW_SHELL_CWD（預設 true，是 SFTP 沙箱逃逸開關）
+- [x] RED：新增 	est/env-example.test.js（5 test）— env 覆蓋率守衛（掃描 src/scripts/start.js 的 SSH_* 引用）、沙箱開關必須記載、限額預設值與 src/config.js 的 eadInteger 一致、無 QEMU/VM 殘留、.env 與 .env.example 鍵集合一致。初始 2 fail
+- [x] GREEN：重寫 .env.example（六個分區：監聽 / 身分與金鑰 / 開發用 bootstrap 憑證 / SFTP / 互動 Shell / 連線限額 / 日誌），補 SSH_SFTP_FOLLOW_SHELL_CWD=true 並附安全警告，host key 路徑註明 ed25519 與 ecdsa fallback，bootstrap 密碼註明 8 字元 / 72 bytes 邊界；.env 同步
+- [x] 文件：README env 表 SSH_DEFAULT_PASSWORD 補 72 bytes 上限、SSH_HOST_KEY_PATH 補演算法說明；CHANGELOG ### Fixed 新增一條
+- [x] 驗證：
+pm run check Syntax 37 files / tests 100 / pass 94 / fail 0 / skipped 6；
+ode start.js 冒煙 PID 存活且 2222 監聽中
+- [x] shell 也落在家目錄、移除 s12ryt 工作區（2026-11-24）：
+  - 用戶指出 `.env` 的遺留為 shell 工作目錄（`SSH_SHELL_CWD=./s12ryt`），並選擇「shell 也落在家目錄」。
+  - `src/shell-runner.js` 支援函式型 `shellCwd`（依 `start()` 的 context 解析）；`src/server.js` 以 `ensureHomeDirectory(config.sftpRoot, username)` 作為 shell 啟動目錄，並移除 SFTP 的 `defaultCwd`。
+  - 移除 `SSH_SHELL_CWD`：`src/config.js`、`start.js`、`Dockerfile`（`/app/s12ryt`）、`.gitignore` / `.dockerignore`、`.env.example` 與本地 `.env`。
+  - TDD：新增 `test/shell-home.test.js` RED（2/2 失敗）→ GREEN；另一 session 的 `test/config-bootstrap.test.js` 改為斷言不再有 `shellCwd`。
+  - 文件：README 移除 `s12ryt/` 工作區、`SSH_SHELL_CWD` 與 docker 掛載說明；CHANGELOG 新增 Changed；`agent/項目表.md` 移除 `s12ryt/` 列。
+  - 驗證：`npm run check` Syntax 38 檔，tests 102 / pass 96 / fail 0 / skipped 6。

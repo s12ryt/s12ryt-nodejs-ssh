@@ -136,3 +136,45 @@
   - 刪除 `src/vm-*.js`、`src/qmp-client.js` 與 7 個測試；`src/index.js`、`Dockerfile`、`.gitignore`、`.dockerignore`、`.env.example` 還原為 `5925441` 版本，`src/config.js` 只保留 `sftpFollowShellCwd`，`package.json` 僅調整 description / keywords。
   - README、CHANGELOG（新增 Removed）、SECURITY.md、`agent/項目表.md` 同步移除 VM 內容；新增守衛測試 `test/no-vm.test.js`。
   - `npm run check`：Syntax 23 檔，tests 42 / pass 38 / fail 0 / skipped 4；11 顆提交（`8f78a4f`..`710bfa7`）逐一驗證全綠，已推送 `origin/main`。
+- SFTP 檔案系統靠齊真實 VPS（2026-11-24）：
+  - 用戶選擇：目錄結構＋檔案屬性＋操作完整性，虛擬根目錄直接對應機器根，僅改 SFTP；需求與驗收標準寫入 `agent/question.md`。
+  - 新增 `src/sftp-fs.js`、`src/sftp-extended.js`；修改 `src/sftp-server.js`、`src/config.js`、`src/server.js`、`test/sftp-server.test.js`；新增 `test/sftp-fs.test.js`、`test/sftp-extended.test.js`。
+  - 行為變更：SFTP 登入落在家目錄（`root`→`/root`，其他→`/home/<帳號>`，自動建立）；`SSH_SFTP_ROOT` 未設定時虛擬根為機器根；清單顯示真實 uid/gid 與 `ls -l` 字串；新增 READLINK / SYMLINK / LINK / SETSTAT / FSETSTAT；沙箱模式 `..` 正規化。
+  - `npm run check`：Syntax 27 檔，tests 56 / pass 50 / fail 0 / skipped 6；變更尚未提交（等待用戶指示）。
+- CVE 遺漏盤查（2026-11-24，純稽核未改碼）：
+  - 用戶需求：「請你幫我檢查當前項目有沒有遺漏的CVE漏洞」。完整報告寫入 `agent/cve-audit-2026-11-24.md`。
+  - `npm audit` 回報 0 vulnerabilities（prod 45 / dev 0 / optional 3），所以全部發現都是 audit 偵測不到的遺漏。
+  - P0-1：Node.js 20 於 2026-04-30 EOL，Dockerfile 兩 stage 與 CI matrix 都還固定 20。錯過 2026-07（11 CVE）、10-21（10 CVE）、11-11（16 CVE）三輪修補，含已列入 CISA KEV 的 CVE-2026-111497（Brotli decoder overflow，remote unauth 潛在 RCE，修在 22.23.4/24.22.1/26.12.1，20.x 永不修）。
+  - P0-2：lockfile 鎖到 ssh2@1.17.0，正是 CVE-2025-70034（CWE-1333 ReDoS，AV:N/PR:N/A:H）唯一受影響版本，上游尚無 patch；可降回 1.16.0 規避。
+  - base image OS layer：CVE-2026-8376 / CVE-2026-13221（Perl regcomp）、CVE-2026-59873（Node 捆綁 node-tar < 7.5.19 gzip bomb）。本專案依賴樹的 tar-fs@2.1.5 已是 GHSA-xrg4-qp5w-2c3w 修補版，與此無關。
+  - 程式碼層（audit 盲區）：auth.js dummy hash cost 10 vs 真實 cost 12 使反時序設計失效、仍可帳號列舉；verifyPassword 無 72-byte 長度上限（bcrypt 靜默截斷＋CPU 放大）；server.js 無認證失敗上限/速率限制；maxClients 預設 3 且無 per-IP 限制（3 條閒置連線即 DoS）；未顯式設定 algorithms；session/channel 無上限。
+  - 供應鏈流程：CI 無 npm audit / SCA gate、無映像掃描、無 Dependabot、base image 未 pin digest。
+  - 本輪未修改任何程式碼，等待用戶決定是否落地修復（修復需先寫 RED 測試）。
+
+## CVE 全面修復（2026-11-24）
+
+- 讀取：src/server.js、src/config.js、src/auth.js、README.md、CHANGELOG.md、.env.example、SECURITY.md、ci.yml、ghcr.yml
+- 新增：src/connection-guard.js、.github/dependabot.yml、test/supply-chain.test.js、test/connection-guard.test.js、test/auth-password-policy.test.js、test/server-hardening.test.js
+- 修改：src/auth.js（BCRYPT_COST/MAX_PASSWORD_BYTES/passwordByteLength、export normalizeUsers、verifyPassword oversized 檢查）、src/config.js（三個新限額 + maxClients 64）、src/server.js（重寫為 guard + ALGORITHMS）、package.json（engines >=24.0.0、ssh2 1.16.0）、package-lock.json（npm install 重建）、Dockerfile（node:24-bookworm-slim）、.github/workflows/ci.yml、.github/workflows/ghcr.yml、README.md、CHANGELOG.md、SECURITY.md、.env.example、agent/question.md
+- 刪除：無
+- 尚未 git commit
+
+## start.js 相容性稽核與修復（2026-11-24）
+
+- 讀取：start.js、scripts/generate-host-key.js、scripts/setup-dev.js、src/config.js、node_modules/ssh2/lib/server.js、node_modules/ssh2/lib/protocol/keyParser.js
+- 新增：src/host-key.js、src/dev-credentials.js、test/start-script.test.js、test/config-bootstrap.test.js
+- 改寫：start.js、scripts/generate-host-key.js、scripts/setup-dev.js
+- 修改：src/config.js（ensureDirectory）、README.md（host key fallback 說明 + 專案結構兩列）、CHANGELOG.md（Fixed 三條 + Security 一條）
+
+## .env 遺留稽核（2026-11-24）
+
+- 讀取：.env、.env.example、.gitignore、src/config.js、src/dev-credentials.js、README.md
+- 新增：	est/env-example.test.js
+- 覆寫：.env.example、.env（先 Remove-Item 再寫入）
+- 修改：README.md（env 表兩列描述）、CHANGELOG.md（### Fixed 一條）、gent/deep_todos.md、gent/memory.md、gent/項目表.md
+- 確認：.gitignore 已含 .env，密碼不會進版控
+- shell 也落在家目錄、移除 s12ryt 工作區（2026-11-24）：
+  - 互動 shell 改以 `ensureHomeDirectory(config.sftpRoot, username)` 啟動（`root` → `/root`，其他 → `/home/<帳號>`）；`createShellRunner` 的 `shellCwd` 可為函式，於 `start()` 依 context 解析。
+  - `SSH_SHELL_CWD` 與 `s12ryt/` 工作區已從 config、start.js、Dockerfile、ignore 規則、`.env.example`、README 移除；本地空的 `s12ryt/` 資料夾保留未刪。
+  - `$HOME` 環境變數仍反映 runtime OS 帳號（未調整）；同一工作樹另有 CVE 稽核 session 的未提交變更（`start.js`、`Dockerfile`、`.env.example`、`test/config-bootstrap.test.js` 僅做最小行級修改）。
+  - `npm run check`：Syntax 38 檔，tests 102 / pass 96 / fail 0 / skipped 6；本輪變更尚未 commit / push。
