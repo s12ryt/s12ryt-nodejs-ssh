@@ -5,7 +5,6 @@ node_modules/
 keys/
 storage/
 s12ryt/
-vm/
 config/users.json
 config/commands.json
 

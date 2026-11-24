@@ -1,7 +1,7 @@
 {
   "name": "s12ryt-nodejs-ssh",
   "version": "0.1.0",
-  "description": "Node.js 20 SSH/SFTP server with an optional resource-controlled QEMU TCG virtual machine.",
+  "description": "Production-ready Node.js 20 SSH server with bcrypt/public-key auth, command whitelisting, optional PTY shell, and sandboxed SFTP.",
   "type": "module",
   "private": false,
   "license": "GPL-3.0-or-later",
@@ -24,10 +24,7 @@
     "public-key",
     "command-whitelist",
     "nodejs",
-    "security",
-    "qemu",
-    "virtual-machine",
-    "tcg"
+    "security"
   ],
   "engines": {
     "node": ">=20.0.0"

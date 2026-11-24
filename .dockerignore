@@ -10,6 +10,5 @@ config/commands.json
 keys
 storage
 s12ryt
-vm
 test
 *.local
