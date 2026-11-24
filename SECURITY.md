@@ -38,5 +38,3 @@ This project is a network-facing SSH server, so security matters. **Please do no
 - 互動 shell 權限提升。Interactive shell privilege escalation.
 - 阻斷服務 / 資源耗盡。Denial of service / resource exhaustion.
 - 敏感資訊（密碼 hash、host key）洩漏。Leakage of secrets such as password hashes or host keys.
-- QEMU image checksum 繞過、NoCloud metadata 洩漏、QMP 未授權控制或 VM host-forward 邊界逃逸。VM image verification, metadata, QMP, and port-forward boundary failures.
-- QEMU APT runtime bootstrap 的 repository 簽章繞過、非原子 runtime 啟用或任意 binary 路徑執行。QEMU runtime package verification, atomic activation, and binary path safety.
