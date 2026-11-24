@@ -56,9 +56,9 @@ test('resolveSftpPath preserves the SFTP root sandbox when shell following is di
     resolveSftpPath({ root, requestedPath: '/nested/file.txt', followShellCwd: false, shellCwd: '/root' }),
     path.join(root, 'nested', 'file.txt')
   );
-  assert.throws(
-    () => resolveSftpPath({ root, requestedPath: '../../secret.txt', followShellCwd: false, shellCwd: '/root' }),
-    /escapes/
+  assert.equal(
+    resolveSftpPath({ root, requestedPath: '../../secret.txt', followShellCwd: false, shellCwd: '/root' }),
+    path.join(root, 'secret.txt')
   );
 });
 

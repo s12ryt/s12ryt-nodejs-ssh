@@ -1,9 +1,20 @@
+// ===== SFTP 檔案系統（ssh2 SFTP server 掛載）=====
+// 功能索引：
+// 1. 路徑解析   resolveSftpPath / sftpClientPath → 跟隨 shell 模式以 shell cwd 或家目錄為起點；沙箱模式以 <root> 為虛擬根並落在家目錄
+// 2. 屬性呈現   toAttrs（真實 uid/gid/mode）+ formatLongName（sftp-fs.js）；readLinkTarget 取符號連結目標
+// 3. 工作目錄   attachSftpServer 內 pathContext / safeResolve → 無 shell 時落於 options.home
+// 4. 檔案操作   OPEN / READ / WRITE / CLOSE / REMOVE / MKDIR / RMDIR / RENAME
+// 5. 目錄瀏覽   REALPATH / STAT / LSTAT / OPENDIR / READDIR（lstat，符號連結顯示 -> 目標）
+// 6. 進階操作   sftp-extended.js：READLINK / SYMLINK / LINK / SETSTAT / FSETSTAT
+// 7. 資源釋放   cleanup / closeHandle → channel 結束時關閉 handle 並移除 listener
 import fs from 'node:fs';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import ssh2 from 'ssh2';
 import { resolveInsideRoot } from './fs-safe.js';
 import { prootGuestPathToHost, prootHostPathToGuest } from './proot-paths.js';
+import { createOwnerNames, formatLongName } from './sftp-fs.js';
+import { EXTENDED_SFTP_EVENTS, attachExtendedSftpOperations } from './sftp-extended.js';
 
 const { OPEN_MODE, STATUS_CODE } = ssh2.utils.sftp;
 const { OK, EOF, NO_SUCH_FILE, PERMISSION_DENIED, FAILURE } = STATUS_CODE;
@@ -11,26 +22,31 @@ const MAX_READ_LENGTH = 64 * 1024;
 const DIRECTORY_BATCH_SIZE = 50;
 const SFTP_REQUEST_EVENTS = [
   'REALPATH', 'STAT', 'LSTAT', 'OPENDIR', 'READDIR', 'OPEN', 'READ', 'WRITE',
-  'CLOSE', 'REMOVE', 'MKDIR', 'RMDIR', 'RENAME'
+  'CLOSE', 'REMOVE', 'MKDIR', 'RMDIR', 'RENAME',
+  ...EXTENDED_SFTP_EVENTS
 ];
 
 function normalizedClientPath(absolutePath) {
   return absolutePath.replaceAll('\\', '/');
 }
 
-export function resolveSftpPath({ root, requestedPath = '.', followShellCwd = true, shellCwd, proot }) {
+export function resolveSftpPath({ root, requestedPath = '.', followShellCwd = true, shellCwd, proot, home }) {
+  const givenPath = String(Buffer.isBuffer(requestedPath) ? requestedPath.toString() : requestedPath || '.');
   if (!followShellCwd) {
-    return resolveInsideRoot(root, requestedPath);
+    const base = path.posix.join('/', home ? path.relative(root, home).replaceAll('\\', '/') : '');
+    const relative = givenPath.startsWith('/') || givenPath.startsWith('\\');
+    const guestPath = relative ? givenPath.replaceAll('\\', '/') : `${base}/${givenPath.replaceAll('\\', '/')}`;
+    return resolveInsideRoot(root, path.posix.normalize(guestPath));
   }
-  const basePath = shellCwd || root;
+  const basePath = shellCwd || home || root;
   if (proot) {
     const guestCwd = prootHostPathToGuest(proot, basePath) || proot.cwd || '/';
-    const guestPath = requestedPath.startsWith('/')
-      ? path.posix.resolve('/', requestedPath)
-      : path.posix.resolve(guestCwd, requestedPath.replaceAll('\\', '/'));
+    const guestPath = givenPath.startsWith('/')
+      ? path.posix.resolve('/', givenPath)
+      : path.posix.resolve(guestCwd, givenPath.replaceAll('\\', '/'));
     return prootGuestPathToHost(proot, guestPath);
   }
-  return path.resolve(basePath, requestedPath.replaceAll('\\', '/'));
+  return path.resolve(basePath, givenPath.replaceAll('\\', '/'));
 }
 
 export function sftpClientPath(absolutePath, proot) {
@@ -40,19 +56,20 @@ export function sftpClientPath(absolutePath, proot) {
 function toAttrs(stats) {
   return {
     mode: stats.mode,
-    uid: typeof process.getuid === 'function' ? process.getuid() : 0,
-    gid: typeof process.getgid === 'function' ? process.getgid() : 0,
+    uid: stats.uid ?? 0,
+    gid: stats.gid ?? 0,
     size: stats.size,
     atime: Math.floor(stats.atimeMs / 1000),
     mtime: Math.floor(stats.mtimeMs / 1000)
   };
 }
 
-function toLongName(name, stats) {
-  const type = stats.isDirectory() ? 'd' : '-';
-  const size = String(stats.size).padStart(8, ' ');
-  const date = stats.mtime.toISOString().slice(0, 10);
-  return `${type}rw-r--r-- 1 owner group ${size} ${date} ${name}`;
+function readLinkTarget(linkPath) {
+  try {
+    return fs.readlinkSync(linkPath);
+  } catch {
+    return '?';
+  }
 }
 
 function flagsToOpenFlags(flags) {
@@ -82,6 +99,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
   const handles = new Map();
   let nextHandleId = 1;
   const followShellCwd = options.followShellCwd ?? true;
+  const owners = createOwnerNames(root);
   let closed = false;
 
   function createHandle(entry) {
@@ -146,7 +164,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
 
   function pathContext() {
     return options.getShellPathContext?.() || {
-      cwd: options.getShellCwd?.() || options.defaultCwd || root,
+      cwd: options.getShellCwd?.() || options.home || options.defaultCwd || root,
       proot: undefined
     };
   }
@@ -156,7 +174,8 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
       root,
       requestedPath: givenPath || '.',
       followShellCwd,
-      shellCwd: context.cwd || options.defaultCwd || root,
+      shellCwd: context.cwd || options.home || options.defaultCwd || root,
+      home: options.home,
       proot: context.proot
     });
   }
@@ -220,8 +239,13 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
           break;
         }
         const entryPath = path.join(entry.path, dirent.name);
-        const stats = fs.statSync(entryPath);
-        batch.push({ filename: dirent.name, longname: toLongName(dirent.name, stats), attrs: toAttrs(stats) });
+        const stats = fs.lstatSync(entryPath);
+        const linkTarget = stats.isSymbolicLink() ? readLinkTarget(entryPath) : undefined;
+        batch.push({
+          filename: dirent.name,
+          longname: formatLongName(dirent.name, stats, owners.owner(stats.uid ?? 0), owners.group(stats.gid ?? 0), linkTarget),
+          attrs: toAttrs(stats)
+        });
       }
       if (batch.length === 0) {
         sftp.status(reqid, EOF);
@@ -326,6 +350,7 @@ export function attachSftpServer(sftp, root, logger, context = {}, options = {})
     }
   });
 
+  attachExtendedSftpOperations(sftp, { safeResolve, getHandle, toAttrs, statusForError });
   sftp.once('end', cleanup);
   sftp.once('close', cleanup);
   sftp.once('error', onSftpError);
