@@ -39,9 +39,9 @@
     "dev:setup": "node scripts/setup-dev.js"
   },
   "dependencies": {
-    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
-    "bcryptjs": "^2.4.3",
-    "dotenv": "^16.4.7",
-    "ssh2": "1.16.0"
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.15.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.10",
+    "ssh2": "1.17.0"
   }
 }
